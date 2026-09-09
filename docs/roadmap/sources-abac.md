@@ -1,6 +1,7 @@
 # Roadmap — multi-source + ABAC
 
-Estende [l'architettura di base](architecture.md) su due assi: più **sorgenti** in ingresso
+Una delle due estensioni di [l'architettura di base](../architecture.md); l'altra è
+[il grafo di espansione](graph.md). Questa procede su due assi: più **sorgenti** in ingresso
 (oltre al filesystem locale, sorgenti remote via HTTP con FHIR dietro un gateway esterno) e un
 livello di **controllo accessi ABAC** che, dati gli attributi del richiedente, limita quali chunk
 sono raggiungibili in retrieval.
@@ -9,7 +10,7 @@ sono raggiungibili in retrieval.
 
 - **Ingestion multi-source — nel base, implementata.** Filesystem locale + sorgenti remote in pull
   via `ApiLoader`, split `Loader` (acquisizione) / `Converter` (parsing). È già descritta in
-  [architecture.md](architecture.md): questo doc non la ridisegna, ne fissa le decisioni e ciò che
+  [architecture.md](../architecture.md): questo doc non la ridisegna, ne fissa le decisioni e ciò che
   resta da fare.
 - **ABAC — contratto cablato su entrambi i lati; mancano PEP e propagazione del filtro.** Esistono il `Filter` neutro
   (`authorization/filter.py`) con la costante `Allow`, la semantica di riferimento `evaluate()`, lo
@@ -154,7 +155,7 @@ flowchart LR
 
 I box sono confini di progetto/processo; `search(query, filter)` e la richiesta al PDP sono le cuciture
 che, verso un servizio esterno, diventano API senza cambiare il flusso. `Labeler` (ingestion) e il
-ramo `XABAC` (query) sono le uniche aggiunte rispetto al [base](architecture.md); tutto il resto esiste già.
+ramo `XABAC` (query) sono le uniche aggiunte rispetto al [base](../architecture.md); tutto il resto esiste già.
 
 ## Acquisizione ≠ parsing (nel base)
 

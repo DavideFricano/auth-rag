@@ -113,3 +113,13 @@ flowchart LR
 | `Chunk` | `id` (`source.id` + content_hash), `text`, `metadata: Metadata` |
 | `ScoredChunk` | `chunk: Chunk`, `score: float` |
 | `Message` | `role` (system/user/assistant), `content` |
+
+## Estensioni
+
+Questo documento descrive il **base**: le due pipeline e i tipi che scorrono. Ogni estensione
+ha il suo documento, che parte da qui e non lo ridisegna.
+
+| documento | asse |
+|---|---|
+| [roadmap/sources-abac.md](roadmap/sources-abac.md) | più sorgenti in ingresso, e il controllo accessi ABAC sul retrieval |
+| [roadmap/graph.md](roadmap/graph.md) | il grafo di relazioni che allarga il contesto recuperato |
