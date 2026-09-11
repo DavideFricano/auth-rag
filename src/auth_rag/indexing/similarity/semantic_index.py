@@ -5,11 +5,11 @@ from typing import Any
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
 
-from autograph_rag.authorization.schema import AccessSchema
-from autograph_rag.embedding.embedder import BaseEmbedder
-from autograph_rag.indexing.similarity.index import SimilarityIndex
-from autograph_rag.storing.store import BaseStore
-from autograph_rag.types import Chunk
+from auth_rag.authorization.schema import AccessSchema
+from auth_rag.embedding.embedder import BaseEmbedder
+from auth_rag.indexing.similarity.index import SimilarityIndex
+from auth_rag.storing.store import BaseStore
+from auth_rag.types import Chunk
 
 
 class SemanticIndex(SimilarityIndex):

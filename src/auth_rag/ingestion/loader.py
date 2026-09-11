@@ -9,8 +9,8 @@ from pathlib import Path
 
 import requests
 
-from autograph_rag.ingestion.converter import BaseConverter, MarkdownConverter
-from autograph_rag.types import Document, Origin, RemoteDocument, Source
+from auth_rag.ingestion.converter import BaseConverter, MarkdownConverter
+from auth_rag.types import Document, Origin, RemoteDocument, Source
 
 logger = logging.getLogger(__name__)
 

@@ -1,4 +1,4 @@
-from autograph_rag.ingestion.cleaner import Cleaner
+from auth_rag.ingestion.cleaner import Cleaner
 
 
 def test_collapses_whitespace():

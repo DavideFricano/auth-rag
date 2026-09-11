@@ -2,14 +2,14 @@ from datetime import date
 
 import pytest
 
-from autograph_rag.ingestion.chunker import (
+from auth_rag.ingestion.chunker import (
     FixedSizeChunker,
     HierarchicalChunker,
     RecursiveCharacterChunker,
     SemanticChunker,
     SentenceChunker,
 )
-from autograph_rag.types import Document, Origin, Source
+from auth_rag.types import Document, Origin, Source
 
 
 def _doc(text: str) -> Document:

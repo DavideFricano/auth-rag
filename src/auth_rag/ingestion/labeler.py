@@ -5,9 +5,9 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from pathlib import Path
 
-from autograph_rag.authorization.schema import AccessSchema
-from autograph_rag.errors import ConformanceError, DeclarationError
-from autograph_rag.types import Document
+from auth_rag.authorization.schema import AccessSchema
+from auth_rag.errors import ConformanceError, DeclarationError
+from auth_rag.types import Document
 
 
 class BaseLabeler(ABC):

@@ -39,7 +39,7 @@ sono raggiungibili in retrieval.
 
 Tre confini netti, ognuno un progetto/processo distinto:
 
-1. **`autograph-rag` (questa repo) — motore RAG + superficie-tool.** Resta una libreria in-process.
+1. **`auth-rag` (questa repo) — motore RAG + superficie-tool.** Resta una libreria in-process.
    L'estensione ABAC aggiunge una `search(query, top_k, filter=...) -> list[ScoredChunk]` **pubblica**:
    è la superficie-tool e `filter` è la cucitura dove l'ABAC spinge il predicato negli index. Niente
    microservizio finché non serve.
@@ -76,7 +76,7 @@ flowchart LR
     user[/"user<br>+ identity"/]:::io
     answer[/"answer"/]:::io
 
-    subgraph RAG["autograph-rag (libreria - motore RAG + tool)"]
+    subgraph RAG["auth-rag (libreria - motore RAG + tool)"]
     subgraph ING["Ingestion (offline)"]
         SRC["Sources<br>(FileSystem/Gateway)"]:::io
         LOAD["Loader"]:::step

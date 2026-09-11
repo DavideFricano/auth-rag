@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from autograph_rag.types import ScoredChunk
+from auth_rag.types import ScoredChunk
 
 
 class BaseRanker(ABC):

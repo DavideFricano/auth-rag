@@ -12,12 +12,12 @@ from datetime import date
 
 import pytest
 
-from autograph_rag.authorization.filter import Allow, And, Match, Not
-from autograph_rag.authorization.schema import AccessSchema, Attribute, AttributeType
-from autograph_rag.errors import ConformanceError, EnforcementError
-from autograph_rag.indexing.index import BaseIndex
-from autograph_rag.storing.store import VolatileStore
-from autograph_rag.types import Chunk, Metadata, Origin, Source
+from auth_rag.authorization.filter import Allow, And, Match, Not
+from auth_rag.authorization.schema import AccessSchema, Attribute, AttributeType
+from auth_rag.errors import ConformanceError, EnforcementError
+from auth_rag.indexing.index import BaseIndex
+from auth_rag.storing.store import VolatileStore
+from auth_rag.types import Chunk, Metadata, Origin, Source
 
 
 class _FakeIndex(BaseIndex):

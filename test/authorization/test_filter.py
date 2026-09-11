@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from autograph_rag.authorization.filter import (
+from auth_rag.authorization.filter import (
     Allow,
     And,
     Filter,
@@ -11,7 +11,7 @@ from autograph_rag.authorization.filter import (
     Or,
     evaluate,
 )
-from autograph_rag.errors import ConformanceError
+from auth_rag.errors import ConformanceError
 
 
 def test_nested_clauses_keep_their_concrete_type():

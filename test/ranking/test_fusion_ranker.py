@@ -3,12 +3,12 @@ from datetime import date
 import numpy as np
 import pytest
 
-from autograph_rag.ranking.fusion_ranker import (
+from auth_rag.ranking.fusion_ranker import (
     DistributionScoreFusionRanker,
     ReciprocalRankFusionRanker,
     RelativeScoreFusionRanker,
 )
-from autograph_rag.types import Chunk, Metadata, Origin, ScoredChunk, Source
+from auth_rag.types import Chunk, Metadata, Origin, ScoredChunk, Source
 
 
 def _sc(chunk_id, score):

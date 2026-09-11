@@ -4,7 +4,7 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from autograph_rag.types import Language
+from auth_rag.types import Language
 
 
 class Settings(BaseSettings):

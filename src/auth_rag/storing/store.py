@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 
 import psycopg
 
-from autograph_rag.types import Chunk
+from auth_rag.types import Chunk
 
 
 class BaseStore(ABC):
@@ -96,7 +96,7 @@ class RemoteStore(BaseStore):
 
     def __init__(
         self,
-        url: str = "postgresql://localhost/autograph",
+        url: str = "postgresql://localhost/auth_rag",
         connection: psycopg.Connection | None = None,
     ) -> None:
         self.conn = connection if connection is not None else psycopg.connect(url)

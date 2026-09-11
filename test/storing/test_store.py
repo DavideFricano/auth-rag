@@ -4,8 +4,8 @@ from datetime import date
 
 import pytest
 
-from autograph_rag.storing.store import PersistentStore, RemoteStore, VolatileStore
-from autograph_rag.types import Chunk, Metadata, Origin, Source
+from auth_rag.storing.store import PersistentStore, RemoteStore, VolatileStore
+from auth_rag.types import Chunk, Metadata, Origin, Source
 
 
 def _chunk(id: str, text: str, source_id: str = "doc1") -> Chunk:
@@ -49,11 +49,11 @@ def test_persistent_survives_reopening_same_db(tmp_path):
     assert [c.id for c in reopened.get(["c0"])] == ["c0"]
 
 
-@pytest.mark.skipif(not os.getenv("AUTOGRAPH_TEST_PG"), reason="needs a Postgres (set AUTOGRAPH_TEST_PG=<url>)")
+@pytest.mark.skipif(not os.getenv("AUTH_RAG_TEST_PG"), reason="needs a Postgres (set AUTH_RAG_TEST_PG=<url>)")
 def test_remote_store_roundtrip():
     import psycopg
 
-    conn = psycopg.connect(os.environ["AUTOGRAPH_TEST_PG"])
+    conn = psycopg.connect(os.environ["AUTH_RAG_TEST_PG"])
     conn.execute("DROP TABLE IF EXISTS chunks")
     store = RemoteStore(connection=conn)
     store.add([_chunk("a0", "t", "doc1"), _chunk("b0", "t", "doc2")])

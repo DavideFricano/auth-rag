@@ -1,4 +1,4 @@
-from autograph_rag.embedding.embedder import LocalEmbedder, OpenAIEmbedder
+from auth_rag.embedding.embedder import LocalEmbedder, OpenAIEmbedder
 
 
 def test_local_embedder_stores_model_name():

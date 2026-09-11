@@ -4,8 +4,8 @@ from abc import ABC, abstractmethod
 
 from sentence_transformers import CrossEncoder
 
-from autograph_rag.ranking.ranker import BaseRanker
-from autograph_rag.types import Chunk, ScoredChunk
+from auth_rag.ranking.ranker import BaseRanker
+from auth_rag.types import Chunk, ScoredChunk
 
 
 class Reranker(BaseRanker, ABC):

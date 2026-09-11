@@ -7,7 +7,7 @@ from collections.abc import Iterator
 import requests
 from openai import OpenAI
 
-from autograph_rag.types import Message
+from auth_rag.types import Message
 
 
 class BaseLLMClient(ABC):

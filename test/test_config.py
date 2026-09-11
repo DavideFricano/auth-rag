@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from autograph_rag.config import Settings
+from auth_rag.config import Settings
 
 
 @pytest.fixture

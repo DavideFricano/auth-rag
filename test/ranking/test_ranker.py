@@ -1,7 +1,7 @@
 from datetime import date
 
-from autograph_rag.ranking.ranker import BaseRanker
-from autograph_rag.types import Chunk, Metadata, Origin, ScoredChunk, Source
+from auth_rag.ranking.ranker import BaseRanker
+from auth_rag.types import Chunk, Metadata, Origin, ScoredChunk, Source
 
 
 def _sc(chunk_id, score):

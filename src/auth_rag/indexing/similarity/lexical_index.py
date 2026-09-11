@@ -6,10 +6,10 @@ from fastembed import SparseTextEmbedding
 from qdrant_client import QdrantClient
 from qdrant_client.models import Modifier, SparseVector, SparseVectorParams
 
-from autograph_rag.authorization.schema import AccessSchema
-from autograph_rag.indexing.similarity.index import SimilarityIndex
-from autograph_rag.storing.store import BaseStore
-from autograph_rag.types import Chunk, Language
+from auth_rag.authorization.schema import AccessSchema
+from auth_rag.indexing.similarity.index import SimilarityIndex
+from auth_rag.storing.store import BaseStore
+from auth_rag.types import Chunk, Language
 
 
 class LexicalIndex(SimilarityIndex):

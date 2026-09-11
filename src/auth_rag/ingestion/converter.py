@@ -12,7 +12,7 @@ from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.types.doc import ContentLayer
 from markitdown import MarkItDown
 
-from autograph_rag.errors import ConversionError
+from auth_rag.errors import ConversionError
 
 
 class Parser(StrEnum):

@@ -6,10 +6,10 @@ from typing import Any
 
 from qdrant_client import QdrantClient, models
 
-from autograph_rag.authorization.schema import AccessSchema
-from autograph_rag.indexing.index import BaseIndex
-from autograph_rag.storing.store import BaseStore
-from autograph_rag.types import Chunk
+from auth_rag.authorization.schema import AccessSchema
+from auth_rag.indexing.index import BaseIndex
+from auth_rag.storing.store import BaseStore
+from auth_rag.types import Chunk
 
 # Fixed namespace so a chunk id always maps to the same point id (idempotent upsert).
 _NAMESPACE = uuid.UUID("6f9619ff-8b86-d011-b42d-00cf4fc964ff")

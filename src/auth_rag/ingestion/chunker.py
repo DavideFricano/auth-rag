@@ -10,7 +10,7 @@ from llama_index.core.node_parser import MarkdownNodeParser
 from nltk.tokenize import sent_tokenize
 from sentence_transformers import SentenceTransformer
 
-from autograph_rag.types import Chunk, Document, Language, Metadata, content_hash
+from auth_rag.types import Chunk, Document, Language, Metadata, content_hash
 
 
 class BaseChunker(ABC):

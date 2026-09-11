@@ -5,8 +5,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from autograph_rag.errors import ConformanceError
-from autograph_rag.types import AttributeValue
+from auth_rag.errors import ConformanceError
+from auth_rag.types import AttributeValue
 
 
 class Filter(BaseModel):

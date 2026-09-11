@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from autograph_rag.augmentation.augmenter import PromptAugmenter
-from autograph_rag.authorization.schema import AccessSchema
-from autograph_rag.config import Settings
-from autograph_rag.embedding.embedder import LocalEmbedder
-from autograph_rag.generation.llm import OllamaClient
-from autograph_rag.indexing.similarity.lexical_index import VolatileLexicalIndex
-from autograph_rag.indexing.similarity.semantic_index import VolatileSemanticIndex
-from autograph_rag.ingestion.chunker import HierarchicalChunker
-from autograph_rag.ingestion.labeler import ManifestLabeler, PropagatingLabeler
-from autograph_rag.ingestion.loader import FileLoader
-from autograph_rag.pipeline import RagPipeline
-from autograph_rag.ranking.fusion_ranker import ReciprocalRankFusionRanker
-from autograph_rag.storing.store import VolatileStore
+from auth_rag.augmentation.augmenter import PromptAugmenter
+from auth_rag.authorization.schema import AccessSchema
+from auth_rag.config import Settings
+from auth_rag.embedding.embedder import LocalEmbedder
+from auth_rag.generation.llm import OllamaClient
+from auth_rag.indexing.similarity.lexical_index import VolatileLexicalIndex
+from auth_rag.indexing.similarity.semantic_index import VolatileSemanticIndex
+from auth_rag.ingestion.chunker import HierarchicalChunker
+from auth_rag.ingestion.labeler import ManifestLabeler, PropagatingLabeler
+from auth_rag.ingestion.loader import FileLoader
+from auth_rag.pipeline import RagPipeline
+from auth_rag.ranking.fusion_ranker import ReciprocalRankFusionRanker
+from auth_rag.storing.store import VolatileStore
 
 if __name__ == "__main__":
     settings = Settings()

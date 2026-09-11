@@ -7,9 +7,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from autograph_rag.authorization.filter import Allow, And, Filter, Match, Not, Or
-from autograph_rag.errors import ConformanceError, DeclarationError
-from autograph_rag.types import AttributeValue
+from auth_rag.authorization.filter import Allow, And, Filter, Match, Not, Or
+from auth_rag.errors import ConformanceError, DeclarationError
+from auth_rag.types import AttributeValue
 
 
 class AttributeType(StrEnum):

@@ -1,5 +1,5 @@
 [project]
-name = "autograph-rag"
+name = "auth-rag"
 version = "0.1.0"
 description = "A unified RAG interface with lightweight graph-based context expansion over a vector store"
 readme = "README.md"

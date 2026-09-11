@@ -2,10 +2,10 @@ from datetime import date
 
 import numpy as np
 
-from autograph_rag.embedding.embedder import BaseEmbedder
-from autograph_rag.indexing.similarity.semantic_index import VolatileSemanticIndex
-from autograph_rag.storing.store import VolatileStore
-from autograph_rag.types import Chunk, Metadata, Origin, Source
+from auth_rag.embedding.embedder import BaseEmbedder
+from auth_rag.indexing.similarity.semantic_index import VolatileSemanticIndex
+from auth_rag.storing.store import VolatileStore
+from auth_rag.types import Chunk, Metadata, Origin, Source
 
 
 class _FakeEmbedder(BaseEmbedder):

@@ -17,21 +17,21 @@ from datetime import date
 import numpy as np
 import pytest
 
-from autograph_rag.augmentation.augmenter import PromptAugmenter
-from autograph_rag.authorization.filter import Match
-from autograph_rag.authorization.schema import AccessSchema, Attribute, AttributeType
-from autograph_rag.embedding.embedder import BaseEmbedder
-from autograph_rag.errors import EnforcementError
-from autograph_rag.generation.llm import BaseLLMClient
-from autograph_rag.indexing.similarity.lexical_index import VolatileLexicalIndex
-from autograph_rag.indexing.similarity.semantic_index import VolatileSemanticIndex
-from autograph_rag.ingestion.chunker import BaseChunker
-from autograph_rag.ingestion.labeler import StaticLabeler
-from autograph_rag.ingestion.loader import BaseLoader
-from autograph_rag.pipeline import RagPipeline
-from autograph_rag.ranking.fusion_ranker import ReciprocalRankFusionRanker
-from autograph_rag.storing.store import VolatileStore
-from autograph_rag.types import Chunk, Document, Language, Message, Metadata, Origin, Source
+from auth_rag.augmentation.augmenter import PromptAugmenter
+from auth_rag.authorization.filter import Match
+from auth_rag.authorization.schema import AccessSchema, Attribute, AttributeType
+from auth_rag.embedding.embedder import BaseEmbedder
+from auth_rag.errors import EnforcementError
+from auth_rag.generation.llm import BaseLLMClient
+from auth_rag.indexing.similarity.lexical_index import VolatileLexicalIndex
+from auth_rag.indexing.similarity.semantic_index import VolatileSemanticIndex
+from auth_rag.ingestion.chunker import BaseChunker
+from auth_rag.ingestion.labeler import StaticLabeler
+from auth_rag.ingestion.loader import BaseLoader
+from auth_rag.pipeline import RagPipeline
+from auth_rag.ranking.fusion_ranker import ReciprocalRankFusionRanker
+from auth_rag.storing.store import VolatileStore
+from auth_rag.types import Chunk, Document, Language, Message, Metadata, Origin, Source
 
 
 def _source(id: str) -> Source:

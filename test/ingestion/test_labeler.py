@@ -9,11 +9,11 @@ from datetime import date
 
 import pytest
 
-from autograph_rag.authorization.schema import AccessSchema, Attribute, AttributeType
-from autograph_rag.errors import ConformanceError, DeclarationError
-from autograph_rag.ingestion.chunker import FixedSizeChunker
-from autograph_rag.ingestion.labeler import ManifestLabeler, PropagatingLabeler, StaticLabeler
-from autograph_rag.types import Document, Origin, Source
+from auth_rag.authorization.schema import AccessSchema, Attribute, AttributeType
+from auth_rag.errors import ConformanceError, DeclarationError
+from auth_rag.ingestion.chunker import FixedSizeChunker
+from auth_rag.ingestion.labeler import ManifestLabeler, PropagatingLabeler, StaticLabeler
+from auth_rag.types import Document, Origin, Source
 
 _SCHEMA = AccessSchema(
     [

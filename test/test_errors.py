@@ -2,7 +2,7 @@
 
 import pytest
 
-from autograph_rag.errors import (
+from auth_rag.errors import (
     AuthorizationError,
     ConformanceError,
     ConversionError,

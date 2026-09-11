@@ -1,5 +1,5 @@
-from autograph_rag.augmentation.augmenter import BaseAugmenter, PromptAugmenter
-from autograph_rag.authorization.filter import (
+from auth_rag.augmentation.augmenter import BaseAugmenter, PromptAugmenter
+from auth_rag.authorization.filter import (
     Allow,
     And,
     Clause,
@@ -10,10 +10,10 @@ from autograph_rag.authorization.filter import (
     Or,
     evaluate,
 )
-from autograph_rag.authorization.schema import AccessSchema, Attribute, AttributeType
-from autograph_rag.config import Settings
-from autograph_rag.embedding.embedder import BaseEmbedder, LocalEmbedder, OpenAIEmbedder
-from autograph_rag.errors import (
+from auth_rag.authorization.schema import AccessSchema, Attribute, AttributeType
+from auth_rag.config import Settings
+from auth_rag.embedding.embedder import BaseEmbedder, LocalEmbedder, OpenAIEmbedder
+from auth_rag.errors import (
     AuthorizationError,
     ConformanceError,
     ConversionError,
@@ -21,21 +21,21 @@ from autograph_rag.errors import (
     EnforcementError,
     RagError,
 )
-from autograph_rag.generation.llm import BaseLLMClient, OllamaClient, OpenAIClient
-from autograph_rag.indexing.index import BaseIndex
-from autograph_rag.indexing.similarity.lexical_index import (
+from auth_rag.generation.llm import BaseLLMClient, OllamaClient, OpenAIClient
+from auth_rag.indexing.index import BaseIndex
+from auth_rag.indexing.similarity.lexical_index import (
     LexicalIndex,
     PersistentLexicalIndex,
     RemoteLexicalIndex,
     VolatileLexicalIndex,
 )
-from autograph_rag.indexing.similarity.semantic_index import (
+from auth_rag.indexing.similarity.semantic_index import (
     PersistentSemanticIndex,
     RemoteSemanticIndex,
     SemanticIndex,
     VolatileSemanticIndex,
 )
-from autograph_rag.ingestion.chunker import (
+from auth_rag.ingestion.chunker import (
     BaseChunker,
     FixedSizeChunker,
     HierarchicalChunker,
@@ -43,33 +43,33 @@ from autograph_rag.ingestion.chunker import (
     SemanticChunker,
     SentenceChunker,
 )
-from autograph_rag.ingestion.cleaner import Cleaner
-from autograph_rag.ingestion.converter import BaseConverter, MarkdownConverter
-from autograph_rag.ingestion.labeler import (
+from auth_rag.ingestion.cleaner import Cleaner
+from auth_rag.ingestion.converter import BaseConverter, MarkdownConverter
+from auth_rag.ingestion.labeler import (
     BaseLabeler,
     ManifestLabeler,
     PropagatingLabeler,
     StaticLabeler,
 )
-from autograph_rag.ingestion.loader import (
+from auth_rag.ingestion.loader import (
     ApiLoader,
     BaseLoader,
     FileLoader,
     LocalLoader,
     RemoteLoader,
 )
-from autograph_rag.pipeline import IngestionPipeline, QueryPipeline, RagPipeline
-from autograph_rag.ranking.fusion_ranker import (
+from auth_rag.pipeline import IngestionPipeline, QueryPipeline, RagPipeline
+from auth_rag.ranking.fusion_ranker import (
     DistributionScoreFusionRanker,
     FusionRanker,
     ReciprocalRankFusionRanker,
     RelativeScoreFusionRanker,
     ScoreFusionRanker,
 )
-from autograph_rag.ranking.ranker import BaseRanker
-from autograph_rag.ranking.reranker import CrossReranker, Reranker
-from autograph_rag.storing.store import BaseStore, PersistentStore, RemoteStore, VolatileStore
-from autograph_rag.types import (
+from auth_rag.ranking.ranker import BaseRanker
+from auth_rag.ranking.reranker import CrossReranker, Reranker
+from auth_rag.storing.store import BaseStore, PersistentStore, RemoteStore, VolatileStore
+from auth_rag.types import (
     Chunk,
     Document,
     Language,

@@ -1,7 +1,7 @@
 from datetime import date
 
-from autograph_rag.ranking.reranker import CrossReranker
-from autograph_rag.types import Chunk, Metadata, Origin, Source
+from auth_rag.ranking.reranker import CrossReranker
+from auth_rag.types import Chunk, Metadata, Origin, Source
 
 
 def _chunks():

@@ -2,17 +2,17 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from autograph_rag.augmentation.augmenter import BaseAugmenter
-from autograph_rag.authorization.filter import Filter
-from autograph_rag.generation.llm import BaseLLMClient
-from autograph_rag.indexing.index import BaseIndex
-from autograph_rag.ingestion.chunker import BaseChunker
-from autograph_rag.ingestion.labeler import BaseLabeler
-from autograph_rag.ingestion.loader import BaseLoader
-from autograph_rag.ranking.fusion_ranker import FusionRanker
-from autograph_rag.ranking.reranker import Reranker
-from autograph_rag.storing.store import BaseStore
-from autograph_rag.types import Chunk, ScoredChunk
+from auth_rag.augmentation.augmenter import BaseAugmenter
+from auth_rag.authorization.filter import Filter
+from auth_rag.generation.llm import BaseLLMClient
+from auth_rag.indexing.index import BaseIndex
+from auth_rag.ingestion.chunker import BaseChunker
+from auth_rag.ingestion.labeler import BaseLabeler
+from auth_rag.ingestion.loader import BaseLoader
+from auth_rag.ranking.fusion_ranker import FusionRanker
+from auth_rag.ranking.reranker import Reranker
+from auth_rag.storing.store import BaseStore
+from auth_rag.types import Chunk, ScoredChunk
 
 
 class IngestionPipeline:

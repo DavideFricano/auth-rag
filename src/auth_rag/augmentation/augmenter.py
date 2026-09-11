@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from autograph_rag.types import Message, ScoredChunk
+from auth_rag.types import Message, ScoredChunk
 
 DEFAULT_SYSTEM_PROMPT = (
     "Answer the user's question based solely on the information in the provided context. "

@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from autograph_rag.ingestion.converter import BaseConverter
-from autograph_rag.ingestion.loader import FileLoader, LocalLoader
-from autograph_rag.types import Document, Origin
+from auth_rag.ingestion.converter import BaseConverter
+from auth_rag.ingestion.loader import FileLoader, LocalLoader
+from auth_rag.types import Document, Origin
 
 
 class _FakeConverter(BaseConverter):

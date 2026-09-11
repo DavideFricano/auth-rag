@@ -1,8 +1,8 @@
 from datetime import date
 
-from autograph_rag.indexing.similarity.lexical_index import VolatileLexicalIndex
-from autograph_rag.storing.store import VolatileStore
-from autograph_rag.types import Chunk, Language, Metadata, Origin, Source
+from auth_rag.indexing.similarity.lexical_index import VolatileLexicalIndex
+from auth_rag.storing.store import VolatileStore
+from auth_rag.types import Chunk, Language, Metadata, Origin, Source
 
 
 def _chunk(id: str, text: str, source_id: str = "doc1") -> Chunk:

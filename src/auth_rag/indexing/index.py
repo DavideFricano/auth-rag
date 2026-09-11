@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from autograph_rag.authorization.filter import Filter, evaluate
-from autograph_rag.authorization.schema import AccessSchema
-from autograph_rag.errors import EnforcementError
-from autograph_rag.storing.store import BaseStore
-from autograph_rag.types import Chunk, ScoredChunk
+from auth_rag.authorization.filter import Filter, evaluate
+from auth_rag.authorization.schema import AccessSchema
+from auth_rag.errors import EnforcementError
+from auth_rag.storing.store import BaseStore
+from auth_rag.types import Chunk, ScoredChunk
 
 
 class BaseIndex(ABC):

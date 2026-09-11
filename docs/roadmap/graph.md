@@ -4,7 +4,9 @@ Una delle due estensioni di [l'architettura di base](../architecture.md); l'altr
 [multi-source + ABAC](sources-abac.md). Questa aggiunge un **grafo di relazioni** che allarga
 l'insieme di chunk recuperati oltre a ciò che la similarità raggiunge.
 
-È la tesi del progetto — il nome viene da qui — ed è **l'unica parte non ancora scritta**.
+È la tesi del progetto, ed è **l'unica parte non ancora scritta**. Il vecchio nome della repo
+(`autograph-rag`) veniva da qui; dopo il rename in `auth-rag` il nome indica l'estensione
+implementata — l'ABAC — invece della tesi ancora da scrivere.
 
 ## Stato (27 agosto 2026)
 

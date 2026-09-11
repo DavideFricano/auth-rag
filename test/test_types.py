@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 from pydantic import ValidationError
 
-from autograph_rag.types import Chunk, Metadata, Origin, ScoredChunk, Source
+from auth_rag.types import Chunk, Metadata, Origin, ScoredChunk, Source
 
 
 def test_source_valid():

@@ -3,9 +3,9 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from autograph_rag.authorization.filter import Allow, And, Match, Not, Or
-from autograph_rag.authorization.schema import AccessSchema, Attribute, AttributeType
-from autograph_rag.errors import ConformanceError, DeclarationError
+from auth_rag.authorization.filter import Allow, And, Match, Not, Or
+from auth_rag.authorization.schema import AccessSchema, Attribute, AttributeType
+from auth_rag.errors import ConformanceError, DeclarationError
 
 
 def _schema() -> AccessSchema:

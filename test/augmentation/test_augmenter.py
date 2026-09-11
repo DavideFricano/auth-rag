@@ -1,4 +1,4 @@
-from autograph_rag.augmentation.augmenter import PromptAugmenter
+from auth_rag.augmentation.augmenter import PromptAugmenter
 
 aug = PromptAugmenter(system="Sei un medico.")
 

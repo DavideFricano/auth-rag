@@ -1,5 +1,5 @@
-from autograph_rag.generation.llm import OllamaClient
-from autograph_rag.types import Message
+from auth_rag.generation.llm import OllamaClient
+from auth_rag.types import Message
 
 
 def test_ollama_payload_contains_model():

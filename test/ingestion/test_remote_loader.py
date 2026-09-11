@@ -2,8 +2,8 @@ import base64
 from collections.abc import Iterable
 from datetime import date
 
-from autograph_rag.ingestion.loader import ApiLoader, RemoteLoader
-from autograph_rag.types import Document, Origin
+from auth_rag.ingestion.loader import ApiLoader, RemoteLoader
+from auth_rag.types import Document, Origin
 
 
 def _item(**overrides):
@@ -102,7 +102,7 @@ def test_api_loader_calls_endpoint_and_maps(monkeypatch):
         captured.update(url=url, headers=headers, timeout=timeout)
         return _FakeResponse({"items": [_item()]})
 
-    monkeypatch.setattr("autograph_rag.ingestion.loader.requests.get", fake_get)
+    monkeypatch.setattr("auth_rag.ingestion.loader.requests.get", fake_get)
 
     loader = ApiLoader("https://gw.example/", path="/documents", headers={"Authorization": "Bearer x"})
     docs = list(loader.load())
@@ -115,7 +115,7 @@ def test_api_loader_calls_endpoint_and_maps(monkeypatch):
 
 def test_api_loader_accepts_bare_list_payload(monkeypatch):
     monkeypatch.setattr(
-        "autograph_rag.ingestion.loader.requests.get",
+        "auth_rag.ingestion.loader.requests.get",
         lambda *a, **k: _FakeResponse([_item(), _item(external_id="doc-2")]),
     )
 

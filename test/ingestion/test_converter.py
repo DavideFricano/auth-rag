@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from autograph_rag.errors import ConversionError
-from autograph_rag.ingestion.converter import (
+from auth_rag.errors import ConversionError
+from auth_rag.ingestion.converter import (
     BaseConverter,
     MarkdownConverter,
 )

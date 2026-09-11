@@ -5,8 +5,8 @@ from collections import defaultdict
 
 import numpy as np
 
-from autograph_rag.ranking.ranker import BaseRanker
-from autograph_rag.types import Chunk, ScoredChunk
+from auth_rag.ranking.ranker import BaseRanker
+from auth_rag.types import Chunk, ScoredChunk
 
 
 class FusionRanker(BaseRanker, ABC):
