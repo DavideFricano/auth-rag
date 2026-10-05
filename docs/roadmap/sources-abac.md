@@ -625,6 +625,116 @@ Filtro finale = **`sicurezza (PEP, non negoziabile) AND rilevanza (LLM, opzional
 **controllo UI fidato**, validato contro le entitlement — mai dedotto dall'LLM. È questo che rende la prompt
 injection irrilevante ai fini dell'accesso: l'identità viaggia accanto alla tool-call, non dentro il prompt.
 
+## Uso come servizio
+
+La libreria resta il nucleo in-process. Chi la usa da processi che non possono importarla — servizi in altri
+linguaggi, un frontend, un orchestratore — la raggiunge attraverso un servizio, che è un involucro sottile
+sopra di essa con dentro il PEP. Il servizio è una scelta di deployment: non cambia l'architettura logica.
+
+```mermaid
+flowchart LR
+    CLI[/"client<br>(identità dell'utente)"/]:::io
+    PROD[/"produttori<br>dei documenti"/]:::io
+    PDP["PDP<br>(XACML, esterno)"]:::policy
+
+    subgraph SVC["auth-rag service (un solo deployable)"]
+        Q["query<br>token utente"]:::step
+        PEP["PEP<br>obligation → Filter"]:::policy
+        I["ingestion<br>credenziali di servizio"]:::step
+        LIB["libreria auth-rag"]:::step
+        Q --> PEP --> LIB
+        I --> LIB
+    end
+
+    CLI --> Q
+    PEP <-->|"richiesta / decisione"| PDP
+    PROD -->|"documenti + access"| I
+
+    SVC:::group
+    classDef io fill:#eceff1,stroke:#607d8b,color:#263238
+    classDef step fill:#e3f2fd,stroke:#1565c0,color:#0d47a1
+    classDef policy fill:#ffebee,stroke:#c62828,color:#b71c1c
+    classDef group fill:#fafafa,stroke:#bdbdbd,color:#424242
+```
+
+- **Un solo deployable per query e ingestion.** Una cosa da gestire, e gli store condivisi tornano banali. I
+  ruoli restano attivabili da configurazione (`query`, `ingest`, entrambi): se il carico un giorno li vuole
+  separati, si separano senza toccare codice — purché store e index siano i `Remote*`.
+- **Due superfici, due autenticazioni.** La query si autentica col **token dell'utente**, e da lì PEP → PDP.
+  L'ingestion con **credenziali di servizio** (client credentials o mTLS), mai con un token utente: chi può
+  scrivere un documento ne decide l'`access`, quindi un utente che potesse farlo si etichetterebbe i dati da
+  sé.
+- **Il PEP sta dentro il servizio e costruisce sempre lui il `Filter`** — `Allow()` compreso. L'API non accetta
+  mai un filtro dal chiamante: un client che mandasse `{"type":"allow"}` si autorizzerebbe da solo.
+- **Il PDP è esterno**, raggiunto via HTTP. Non legge `access_schema.json`, ma ne usa nomi e tipi nelle
+  policy: il vocabolario è il contratto anche con chi le scrive.
+- **La traduzione obligation → `Filter` non sta in `FilterAdapter`**, che legge e scrive solo il formato neutro;
+  è un modulo a sé, perché il `Filter` non dipenda dal dialetto di un policy engine. Il JSON del `Filter` serve
+  ad audit e test; diventerebbe un contratto fra linguaggi solo se a chiamare la ricerca fosse un PEP non
+  Python.
+- **L'ingestion accetta anche il push**, non solo il pull via loader. Nella libreria è già fatto:
+  `IngestionPipeline.ingest(docs)` prende i documenti del loader, se c'è, e poi quelli passati, e ingerire un
+  documento **sostituisce** ciò che la sua sorgente aveva. L'upsert per `chunk.id` non bastava: l'id è
+  `source.id:content_hash(text)`, quindi un documento il cui testo cambia lasciava i chunk vecchi **con gli
+  attributi vecchi**. **Come i documenti arrivano al servizio e come si scaricano è da ripensare**, e con
+  questo gli endpoint di ingestion.
+- **Il contratto con chi produce i documenti è l'id della sorgente**, che diventa `Source.id`: stabile fra un
+  invio e l'altro (l'id nel sistema di origine, non un hash del contenuto) e **unico fra sistemi di origine**,
+  con un prefisso (`cartella-clinica:123`). Se cambiasse, la sostituzione non troverebbe niente e
+  resterebbero due versioni; se collidesse, un sistema cancellerebbe i documenti dell'altro.
+
+### Attributi che cambiano a monte
+
+L'ABAC sta **dentro**: gli attributi sono sui chunk e il filtro morde nel retrieval, su ogni index. È ciò per
+cui la libreria esiste. Il prezzo è che gli attributi vivono anche nei sistemi di origine, e il RAG ne tiene una
+**copia**: se a monte cambia la business unit di un documento, il RAG applica quella vecchia finché qualcuno non
+lo riallinea.
+
+Il confine di responsabilità è netto. La libreria garantisce che **ciò che ha venga applicato**, e dà gli
+strumenti per riallinearlo; **quanto sia aggiornato** è un problema di integrazione del deployment, come la
+qualità dei documenti. Detto in una riga: *gli attributi valgono quanto l'ultima sincronizzazione*.
+
+**Riallineare costa poco**: `IngestionPipeline.update({source_id: {"access": ...}})` riscrive il `Source` sui
+chunk nello store, passando dal labeler, senza riconvertire né rifare embedding — gli index non tengono
+attributi. Come arrivi l'informazione dipende dall'attributo:
+
+| attributo | come si riallinea |
+|---|---|
+| proprietà del documento, l'origine **emette eventi** | un evento per modifica, che diventa un `update` |
+| proprietà del documento, **senza eventi** | un riallineamento periodico dei soli attributi, con un ritardo massimo noto |
+| **relazione** o regola dinamica, non una proprietà del documento | non si copia: va chiesta al PDP a query time |
+
+L'ultima riga è l'unica che il codice non copre ancora: richiederebbe un **controllo tardivo per candidato**, il
+PEP che chiede al PDP una decisione per ciascun documento trovato (XACML *Multiple Decision Profile*), prima
+della fusione — il secondo stadio del [pattern a due stadi](#query-con-enforcement-abac-target). È
+un'estensione per i casi dinamici, non un'alternativa all'ABAC dentro.
+
+**Scartata: spostare l'autorizzazione fuori.** Il PDP, o un servizio accanto, restituirebbe gli id dei documenti
+accessibili e il filtro diventerebbe `Match` su quegli id. Sempre aggiornato, e l'algebra lo esprime già, ma
+toglie alla libreria proprio il filtro sugli attributi; le liste crescono col corpus; e un PDP XACML risponde
+Permit/Deny a una richiesta, non elenca risorse — è la reverse-query, non standard.
+
+### Questioni aperte
+
+1. **Endpoint di ingestion e scaricamento dei documenti.** Cosa porta il push e da dove si prende il
+   contenuto: da lì si decide cosa sostituisce `ApiLoader` e `RemoteDocument`, che così come sono servono solo
+   a un servizio che restituisce i documenti in JSON con il contenuto in base64.
+2. **Identità nelle chiamate da altri servizi.** Un servizio che chiama il RAG con le proprie credenziali fa
+   vedere al PDP sé stesso, non l'utente per cui agisce: il filtro si allarga ed è il *confused deputy*. Deve
+   propagare il token dell'utente, o un token delegato (token exchange).
+3. **Forma delle obligation.** [La convenzione sopra](#la-convenzione-sullobligation-id) è un'obligation per
+   attributo (`urn:<org>:filter:<attributo>`). L'alternativa è una sola obligation `data-filter` con un
+   `AttributeAssignment` per valore, gli `AttributeId` col prefisso `urn:<org>:resource:` e lo stesso
+   `AttributeId` ripetuto per un attributo multi-valore. Esprimono lo stesso (congiunzione di `Match`); si
+   sceglie con chi scrive le policy, guardando cosa è più naturale da autorare. In entrambi i casi un `Permit`
+   senza filtro è un deny, a meno di un'obligation esplicita che il PEP traduce in `Allow()`.
+4. **I valori, non solo i tipi.** Lo schema dichiara che `classification` è un keyword, non quali keyword
+   esistono: un `"Internal"` scritto dal PDP contro un `"internal"` scritto dal labeler non solleva, nega in
+   silenzio. È l'unico disaccordo di configurazione che non fa rumore. Rimedio possibile: un `values`
+   opzionale su `Attribute`, controllato da `validate_access` e da `validate_filter`.
+5. **Dove vive il servizio**: una cartella `services/` in questa repo, o una repo a sé che dipende dalla
+   libreria.
+
 ## Decisioni prese (priorità: semplicità)
 
 - **FHIR fuori dalla lib, da subito** — gateway esterno in pull via `ApiLoader`; isola
@@ -656,6 +766,15 @@ injection irrilevante ai fini dell'accesso: l'identità viaggia accanto alla too
   restringere.
 - **Multi-tenancy** *(futuro)*: singola collection + filtro; namespace/collection per tenant o tier di
   classificazione se serve isolamento forte; con pgvector, Row-Level Security come difesa in profondità.
+- **Un servizio sopra la libreria, query e ingestion nello stesso deployable**, con autenticazione separata:
+  token utente per la query, credenziali di servizio per l'ingestion. Il PEP sta nel servizio e l'API non
+  accetta filtri dal chiamante. Vedi [l'uso come servizio](#uso-come-servizio).
+- **Ingestion anche in push**: `ingest(docs)` accetta documenti dal chiamante, e ingerire sostituisce ciò che
+  la sorgente aveva, per non lasciare chunk vecchi con attributi vecchi. Endpoint e scaricamento dei
+  documenti restano da ripensare.
+- **L'ABAC resta dentro**: gli attributi stanno sui chunk e si riallineano con `update`, senza rifare
+  embedding. Quanto siano aggiornati è responsabilità di chi integra; spostare l'autorizzazione fuori, con
+  una lista di id accessibili, è scartato.
 
 ## Sequenza di rilascio
 
@@ -675,3 +794,6 @@ injection irrilevante ai fini dell'accesso: l'identità viaggia accanto alla too
 4. **PDP XACML esterno (container)** — si sostituisce il `compile_filter` locale con l'hop al servizio XACML
    dietro la **stessa interfaccia**; il filtro arriva come **obligation** tradotta nel `Filter` neutro.
    Verificare il supporto obligation/reverse-query del motore. OPA/Cedar restano alternative.
+5. **Servizio** — ⚙️ *lato libreria fatto*: `ingest(docs)` con sostituzione per
+   sorgente, `update` per riallineare gli attributi, `remove` su più sorgenti. Resta il servizio: le API di
+   query col PEP dentro, e quelle di ingestion, da ripensare insieme a come si scaricano i documenti. Dettagli e questioni aperte in [l'uso come servizio](#uso-come-servizio).
