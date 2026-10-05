@@ -23,6 +23,9 @@ from auth_rag.errors import (
 )
 from auth_rag.generation.llm import BaseLLMClient, OllamaClient, OpenAIClient
 from auth_rag.indexing.index import BaseIndex
+from auth_rag.indexing.relation.extractor import BaseExtractor, LLMExtractor, Triple
+from auth_rag.indexing.relation.graph_index import RemoteGraphIndex, VolatileGraphIndex
+from auth_rag.indexing.relation.index import Relation, RelationIndex
 from auth_rag.indexing.similarity.lexical_index import (
     LexicalIndex,
     PersistentLexicalIndex,
@@ -93,6 +96,7 @@ __all__ = [
     "BaseChunker",
     "BaseConverter",
     "BaseEmbedder",
+    "BaseExtractor",
     "BaseIndex",
     "BaseLLMClient",
     "BaseLabeler",
@@ -116,6 +120,7 @@ __all__ = [
     "FusionRanker",
     "HierarchicalChunker",
     "IngestionPipeline",
+    "LLMExtractor",
     "Language",
     "LexicalIndex",
     "LocalEmbedder",
@@ -141,8 +146,11 @@ __all__ = [
     "RagPipeline",
     "ReciprocalRankFusionRanker",
     "RecursiveCharacterChunker",
+    "Relation",
+    "RelationIndex",
     "RelativeScoreFusionRanker",
     "RemoteDocument",
+    "RemoteGraphIndex",
     "RemoteLexicalIndex",
     "RemoteLoader",
     "RemoteSemanticIndex",
@@ -156,6 +164,8 @@ __all__ = [
     "Settings",
     "Source",
     "StaticLabeler",
+    "Triple",
+    "VolatileGraphIndex",
     "VolatileLexicalIndex",
     "VolatileSemanticIndex",
     "VolatileStore",

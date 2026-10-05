@@ -23,6 +23,8 @@ from auth_rag.authorization.schema import AccessSchema, Attribute, AttributeType
 from auth_rag.embedding.embedder import BaseEmbedder
 from auth_rag.errors import EnforcementError
 from auth_rag.generation.llm import BaseLLMClient
+from auth_rag.indexing.relation.extractor import BaseExtractor, Triple
+from auth_rag.indexing.relation.graph_index import VolatileGraphIndex
 from auth_rag.indexing.similarity.lexical_index import VolatileLexicalIndex
 from auth_rag.indexing.similarity.semantic_index import VolatileSemanticIndex
 from auth_rag.ingestion.chunker import BaseChunker
@@ -224,17 +226,46 @@ class _SourceChunker(BaseChunker):
         return [Chunk(id=f"{doc.source.id}:0", text=doc.text, metadata=metadata)]
 
 
-def _abac_pipeline(labeler: StaticLabeler | None) -> RagPipeline:
+class _KeywordExtractor(BaseExtractor):
+    """Relates the first symptom a chunk names to the others.
+
+    Both documents name "febbre", so the graph has one node they meet on — which is the
+    only thing the relation family needs in order to be a third, independent retriever
+    here rather than a decoration.
+    """
+
+    VOCABULARY = ("febbre", "tosse", "pressione", "brividi", "glicemia")
+
+    def extract(self, chunk: Chunk) -> list[Triple]:
+        named = self.entities(chunk.text)
+        return [
+            Triple(subject=named[0], predicate="compare con", object=other)
+            for other in named[1:]
+        ]
+
+    def entities(self, text: str) -> list[str]:
+        """The query side, which is how the graph finds where to enter — the same
+        vocabulary it was built from, which is the point of using one extractor."""
+        return [word for word in self.VOCABULARY if word in text]
+
+
+def _abac_pipeline(labeler: StaticLabeler | None, schemas: dict | None = None) -> RagPipeline:
+    """All three index families, each given the schema — unless ``schemas`` overrides one,
+    which is how the mis-wiring case below is built."""
     store = VolatileStore()
     embedder = _FakeEmbedder(_TABLE, dim=2)
+    schemas = {"semantic": _ABAC_SCHEMA, "lexical": _ABAC_SCHEMA, "graph": _ABAC_SCHEMA} | (
+        schemas or {}
+    )
     return RagPipeline(
         loader=_FakeLoader(_DOCS),
         labeler=labeler,
         chunker=_SourceChunker(),
         store=store,
         indexes=[
-            VolatileSemanticIndex(store, embedder, schema=_ABAC_SCHEMA),
-            VolatileLexicalIndex(store, language=Language.ITALIAN, schema=_ABAC_SCHEMA),
+            VolatileSemanticIndex(store, embedder, schema=schemas["semantic"]),
+            VolatileLexicalIndex(store, language=Language.ITALIAN, schema=schemas["lexical"]),
+            VolatileGraphIndex(store, _KeywordExtractor(), schema=schemas["graph"]),
         ],
         ranker=ReciprocalRankFusionRanker(),
         augmenter=PromptAugmenter(system="S"),
@@ -323,3 +354,38 @@ def test_without_a_schema_the_pipeline_keeps_working_unfiltered():
     rag.ingest_pipeline.ingest()
 
     assert rag.query_pipeline.retrieve("febbre")
+
+
+def test_abac_composes_with_every_index_family():
+    """The property worth stating outright: **a pipeline with ABAC is always available**.
+
+    Enforcement lives in ``BaseIndex.retrieve``, so it is not something a family opts into
+    — the relation family enforces the same predicate as the two similarity ones although
+    it shares no retrieval code with them, and it is the base class, not the graph, that
+    does it. Adding a fourth family would inherit the same guarantee.
+    """
+    rag = _abac_pipeline(StaticLabeler(_ABAC_SCHEMA, {"tenant": "acme"}))
+    rag.ingest_pipeline.ingest()
+    semantic, lexical, graph = rag.query_pipeline.indexes
+
+    acme = Match(attribute="tenant", values={"acme"})
+    globex = Match(attribute="tenant", values={"globex"})
+    for index in (semantic, lexical, graph):
+        assert index.retrieve("febbre", 10, filter=acme), f"{type(index).__name__} found nothing"
+        assert index.retrieve("febbre", 10, filter=globex) == []
+
+    # and the graph really did reach something, rather than passing by being empty
+    assert graph.graph.number_of_nodes() > 0
+
+
+def test_an_index_wired_without_the_schema_refuses_the_whole_query():
+    """The half-configured deployment fails loudly instead of quietly enforcing less.
+
+    A pipeline is only as authorized as its weakest index, so the one that was handed no
+    schema does not silently return everything: it raises, and the query dies with it.
+    """
+    rag = _abac_pipeline(StaticLabeler(_ABAC_SCHEMA, {"tenant": "acme"}), schemas={"graph": None})
+    rag.ingest_pipeline.ingest()
+
+    with pytest.raises(EnforcementError, match="filtering needs the AccessSchema"):
+        rag.query_pipeline.retrieve("febbre", Match(attribute="tenant", values={"acme"}))

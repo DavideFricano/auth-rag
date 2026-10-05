@@ -17,8 +17,9 @@ class BaseIndex(ABC):
     ingestion pipeline adds and deletes the records once, while each index manages only
     its own ids. Carries no backend import.
 
-    An optional ``schema`` says whether this deployment does ABAC at all — without one a
-    filter is merely accepted if given; with one it is mandatory. See ``retrieve``.
+    An optional ``schema`` says whether this deployment does ABAC at all, and the two go
+    together in both directions: with one, a filter is mandatory; without one, passing a
+    filter is refused rather than ignored. See ``retrieve``.
     """
 
     def __init__(self, store: BaseStore, schema: AccessSchema | None = None) -> None:
@@ -39,7 +40,10 @@ class BaseIndex(ABC):
     def _search(self, query: str, top_i: int) -> list[tuple[str, float]]:
         """Backend primitive: top ``top_i`` ``(chunk_id, score)``, higher = more relevant.
         Ids are unique — a chunk appears at most once, or fusion would count it twice.
-        Not called directly: the public entry point is ``retrieve``."""
+        Not called directly: the public entry point is ``retrieve``.
+
+        May return more than ``top_i``: ``retrieve`` cuts the list down after the filter,
+        so an index whose candidates get thinned can over-fetch."""
 
     def retrieve(
         self, query: str, top_i: int, filter: Filter | None = None
@@ -58,6 +62,9 @@ class BaseIndex(ABC):
         and no notion of a required attribute, so an unlabelled chunk would satisfy a
         negation. And a schemaless index asked for chunks that turn out to be labelled
         raises as well, since someone enforced something the query side knows nothing of.
+
+        ``top_i`` counts authorized results: the list is cut to it only after the check,
+        so an unauthorized candidate does not silently cost a slot.
         """
         if self.schema is None:
             if filter is not None:
@@ -84,10 +91,11 @@ class BaseIndex(ABC):
                     "these chunks carry access attributes but this index enforces nothing: "
                     "give it the AccessSchema they were labelled against"
                 )
-            return results
-        return [
+            return results[:top_i]
+        authorized = [
             sc
             for sc in results
             if self.schema.is_labeled(sc.chunk.metadata.source.access)
             and evaluate(filter, sc.chunk.metadata.source.access)
         ]
+        return authorized[:top_i]
