@@ -96,7 +96,7 @@ flowchart LR
         SEARCH["search(query, filter)<br>tool surface"]:::step
         BM["LexicalIndex<br>(BM25/IDF)"]:::step
         VR["SemanticIndex<br>(cosine)"]:::step
-        GR["GraphIndex<br>(previsto)"]:::step
+        GR["GraphIndex<br>(networkx/Neo4j)"]:::step
         F["FusionRanker<br>(RRF/RSF/DBSF)"]:::rank
         RR["Reranker<br>(CrossEncoder)"]:::rank
         SEARCH --> BM
@@ -387,7 +387,7 @@ flowchart LR
     PDP -- filter --> PEP
     q[/"query + attrs<br>"/] -->|"str + attrs"| PEP
     q -- str --> AUG["PromptAugmenter"]
-    PEP -->|"str + filter"| BM["LexicalIndex<br>(BM25/IDF)"] & VR["SemanticIndex<br>(cosine)"] & GR["GraphIndex<br>(previsto)"]
+    PEP -->|"str + filter"| BM["LexicalIndex<br>(BM25/IDF)"] & VR["SemanticIndex<br>(cosine)"] & GR["GraphIndex<br>(networkx/Neo4j)"]
     VR -- list[ScoredChunk] --> F["FusionRanker<br>(RRF/RSF/DBSF)"]
     BM -- list[ScoredChunk] --> F
     GR -- list[ScoredChunk] --> F
@@ -571,7 +571,7 @@ fare enforcement, quindi l'in-memory restava un PoC. Non è più vero: con `eval
 l'enforcement è in Python e vale per **qualunque** backend, compresi quelli scritti da terzi. Il pushdown
 cambia solo il recall e le prestazioni, non se il filtro c'è.
 
-### Aperto: l'ABAC sul `GraphIndex`
+### Chiuso: l'ABAC sul `GraphIndex`
 
 Sui due index per similarità il filtro è una condizione sulla **selezione dei candidati**. Sul grafo no: il
 grafo espande per **traversal**, quindi il filtro interagisce con la *raggiungibilità* — il sottografo
@@ -593,10 +593,24 @@ e i nodi intermedi non sono osservabili. È un **canale inferenziale**: un cammi
 può far risalire in classifica un chunk *autorizzato* che altrimenti non c'entrava, quindi l'ordinamento di ciò
 che vedi dipende da ciò che non vedi — e con molte query mirate diventa sondabile.
 
-**Da decidere prima di scrivere il grafo**, perché determina dove vanno gli attributi. E se si scegliesse la
-seconda, va aggiunto l'**over-fetch** e va annotato qui che il principio "mai post-filtering" è stato
-consapevolmente derogato per il solo stadio di espansione — dove costa bonus mancati, non risultati primari
-mancati.
+**Chiusa sulla seconda (23 settembre 2026).** Il `RelationIndex` non filtra: espande liberamente e
+`BaseIndex.retrieve` applica il predicato una volta sola, come per gli altri due index. Vince l'argomento del
+**secondo punto di enforcement** — un controllo per-hop sarebbe la stessa regola scritta in due posti, e due
+posti divergono in silenzio. Il canale inferenziale descritto sopra viene quindi **accettato, non risolto**:
+con molte query mirate l'ordinamento resta sondabile, e vale la pena rileggere questa pagina il giorno in cui
+il *rank* diventasse esso stesso un'informazione sensibile.
+
+Le due conseguenze annotate sono state entrambe applicate:
+
+- **L'over-fetch c'è.** `RelationIndex._search` restituisce `top_i * over_fetch` candidati e
+  `BaseIndex.retrieve` taglia a `top_i` **dopo** il check, così un chunk non autorizzato non consuma uno slot.
+  È l'unica riga che il grafo ha richiesto in `BaseIndex`, e non nomina il grafo.
+- **La deroga è scritta**: "mai post-filtering" è sospeso per il solo stadio di espansione. Resta intatto dove
+  il documento lo esigeva, cioè **prima della fusione** — ciò che il grafo consegna al `FusionRanker` è già
+  solo autorizzato, quindi né le posizioni che legge RRF né i minimi/massimi che normalizza RSF dipendono da
+  chunk che il soggetto non può vedere.
+
+Il resto delle decisioni sul grafo sta in [graph.md](graph.md#le-cinque-decisioni-e-come-sono-state-chiuse).
 
 ### Il chatbot non decide l'autorizzazione
 

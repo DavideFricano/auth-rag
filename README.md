@@ -93,20 +93,20 @@ Two lifecycles that share a store and a set of indexes: **ingestion** (offline) 
 | **Conversion** | dispatch on media type: Docling for PDF/DOCX/PPTX/images, MarkItDown for CSV/JSON/XLSX/HTML, decode for text |
 | **Chunking** | five strategies — markdown-hierarchical (default), sentence, recursive-character, fixed-size, semantic |
 | **Storage** | the chunk data lives once in a shared store; indexes hold only ids plus their own representation |
-| **Retrieval** | hybrid — dense (cosine) and sparse (BM25 with corpus IDF computed server-side) |
+| **Retrieval** | two families — *similarity*, dense (cosine) and sparse (BM25 with corpus IDF computed server-side), and *relation*, the graph below |
 | **Fusion** | RRF, or score fusion with min-max / distribution normalization |
 | **Reranking** | cross-encoder over the fused candidates |
 | **Generation** | Ollama or OpenAI, fed a neutral `list[Message]` |
 
-Every component exists in three tiers — **volatile**, **persistent**, **remote** — named for the
-guarantee they give (does it survive a restart? is it shared across processes?) rather than for the
-product underneath.
+Components exist in tiers — **volatile**, **persistent**, **remote** — named for the guarantee they
+give (does it survive a restart? is it shared across processes?) rather than for the product
+underneath. The graph has two of the three: a graph database has no equivalent of an in-memory
+Qdrant, so the in-process tier came first and the middle one has no obvious engine.
 
 ## Graph-based context expansion
 
-*Planned; nothing of this is implemented yet.* The original thesis of the project, kept because the
-retrieval architecture is already shaped to receive it: a relation index plugs in as one more index
-alongside the similarity ones, with no change to the query pipeline.
+The original thesis of the project, and the architecture received it as designed: the relation index
+plugs in as one more index alongside the similarity ones, with **no change to the query pipeline**.
 
 In canonical Graph RAG the graph **is** the index — an extractor builds a knowledge base where every
 node is a specific embedding, and the query navigates it. That demands extraction accurate enough to
@@ -120,8 +120,29 @@ similar, because similarity alone would never have put them together. Since the 
 record that two nodes in different chunks are related, and not to be a faithful map of the domain, it
 stays coarse, cheap to build and cheap to maintain.
 
-The open questions — how a traversal becomes a score, where the seeds come from, how access control
-interacts with reachability, and whether the expansion pays for itself at all — are written up in
+Four questions had to be answered to write it, and the answers are what the code now commits to:
+
+- **A traversal becomes a score** by decaying with distance, `seed * decay ** hop`. The number is
+  not commensurable with a cosine or with BM25, which **constrains the fusion ranker to RRF** — RRF
+  reads only positions, while RSF and DBSF would hand the graph whatever weight the shape of the
+  decay curve implied.
+- **The seeds come from the graph's own node names**, not from the semantic index. Borrowing them
+  would be less code and would cost the independence RRF pays for: it rewards a chunk that several
+  retrievers found separately, and a graph seeded from the vector store would agree partly with
+  itself.
+- **Access control stays where it already was.** The graph does not filter; it expands freely and
+  the predicate is applied once, in `BaseIndex.retrieve`, exactly as for the other two. Attributes
+  on the edges with a check per hop would give a provably closed expansion, at the price of a second
+  enforcement point to keep aligned with the first. The accepted cost is an inference channel, not a
+  content leak: a path through chunks you may not see can lift an *authorized* chunk up the ranking.
+  It is also the one place where "never post-filter" is knowingly relaxed, and over-fetch is what
+  pays for it.
+- **Whether the expansion pays for itself is still unknown**, and that is the honest gap: there is
+  no evaluation harness, so recall@k and nDCG cannot be put behind the claim. The graph exists; the
+  argument for keeping it does not yet.
+
+Two tiers ship: `VolatileGraphIndex` on networkx, in-process, and `RemoteGraphIndex` on Neo4j, where
+the traversal runs in the database. The reasoning behind each decision is in
 [docs/roadmap/graph.md](docs/roadmap/graph.md).
 
 ## Installation

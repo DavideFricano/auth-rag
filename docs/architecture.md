@@ -20,11 +20,11 @@ indicizzazione ibrida (densa + sparsa), fusione dei ranking, reranking, costruzi
 generazione. Ogni stadio è una **porta** (ABC) con una o più implementazioni intercambiabili; chi
 usa la libreria compone gli stadi che gli servono.
 
-La tesi del progetto — il **grafo di espansione del contesto** — non è ancora scritta.
-Il razionale sta nel [README](../README.md) e il piano in [roadmap/graph.md](roadmap/graph.md); qui
-compare solo come `GraphIndex` *previsto* nei diagrammi, perché il punto d'innesto (un `BaseIndex`
-come gli altri, accanto a quelli per similarità) è già deciso e non richiederà modifiche alla
-pipeline.
+La tesi del progetto — il **grafo di espansione del contesto** — è ora scritta, nella famiglia
+`indexing/relation/`. Il razionale sta nel [README](../README.md) e le decisioni in
+[roadmap/graph.md](roadmap/graph.md). Il punto d'innesto previsto ha retto: è entrata come un
+`BaseIndex` qualsiasi accanto a quelli per similarità, **senza nessuna modifica alla pipeline**.
+Quello che ancora manca non è il grafo ma il modo di sapere se paga: l'harness di valutazione.
 
 Due cicli di vita separati, che condividono soltanto lo store e gli index:
 
@@ -50,13 +50,15 @@ cosa gli è promesso* (dura? è condiviso fra processi?), non quale prodotto c'�
 resta un dettaglio del costruttore, e sostituirlo non cambia il nome della classe.
 
 **3. Il dato del chunk sta in un posto solo.** Lo `Store` è la verità su *cos'è* un chunk; ogni
-index tiene **solo id più la propria rappresentazione** (vettore denso, vettore sparso, in futuro
-nodi e archi) e risolve i chunk attraverso lo store condiviso. Niente duplicazione, niente
+index tiene **solo id più la propria rappresentazione** (vettore denso, vettore sparso, nodi e
+archi) e risolve i chunk attraverso lo store condiviso. Niente duplicazione, niente
 disallineamento fra due copie dello stesso testo.
 
 **4. Idempotenza per costruzione.** L'id di un chunk è `source.id` + hash del contenuto, il point id
 di Qdrant è un `uuid5` deterministico di quell'id, e ogni `add`/`insert` è un upsert. Re-ingerire lo
-stesso corpus è un'operazione neutra, non un raddoppio.
+stesso corpus è un'operazione neutra, non un raddoppio. Il grafo è l'unico posto in cui questo
+principio non viene gratis — l'estrattore è un LLM — ed è il motivo per cui quel componente ha tre
+accorgimenti apposta: temperatura 0, nomi dei nodi normalizzati, e ricostruzione per sorgente.
 
 **5. La sicurezza sta nel punto più basso che la può garantire.** L'enforcement ABAC vive in
 `BaseIndex.retrieve`, non in `QueryPipeline`: gli index sono API pubblica e qualcuno li chiamerà
@@ -93,11 +95,14 @@ src/auth_rag/
 │
 ├── indexing/
 │   ├── index.py          # BaseIndex: insert/delete/retrieve + enforcement ABAC
-│   └── similarity/       # la famiglia "rilevanza per similarità alla query"
-│       ├── index.py      #   meccanica Qdrant condivisa fra denso e sparso
-│       ├── semantic_index.py  # denso, cosine
-│       └── lexical_index.py   # sparso, BM25 con IDF server-side
-│   └── (relation/)       # previsto: la famiglia "rilevanza per relazioni" — il grafo
+│   ├── similarity/       # la famiglia "rilevanza per similarità alla query"
+│   │   ├── index.py      #   meccanica Qdrant condivisa fra denso e sparso
+│   │   ├── semantic_index.py  # denso, cosine
+│   │   └── lexical_index.py   # sparso, BM25 con IDF server-side
+│   └── relation/         # la famiglia "rilevanza per relazioni" — il grafo
+│       ├── index.py      #   RelationIndex: semi + funzione di score, condivisi
+│       ├── extractor.py  #   chunk -> Triple (LLM a temperatura 0)
+│       └── graph_index.py  # networkx (volatile) e Neo4j (remoto)
 │
 ├── ranking/
 │   ├── ranker.py         # BaseRanker: ordinamento e taglio top-k deterministici
@@ -126,7 +131,7 @@ flowchart TB
 
     ING["ingestion<br>loader · converter · cleaner<br>labeler · chunker"]:::step
     EM["embedding"]:::step
-    IX["indexing<br>BaseIndex + similarity/"]:::store
+    IX["indexing<br>BaseIndex + similarity/ + relation/"]:::store
     ST["storing"]:::store
     RK["ranking"]:::rank
     AU["augmentation"]:::step
@@ -139,7 +144,7 @@ flowchart TB
     PL --> ING & IX & ST & RK & AU & LM & AZ
     CR --> ING & IX & EM & ST & AZ
     ING --> AZ
-    IX --> AZ & ST & EM
+    IX --> AZ & ST & EM & LM
     ING --> TY
     IX --> TY
     RK --> TY
@@ -161,8 +166,12 @@ Due proprietà da notare:
 - **`types.py` non dipende da niente** e tutti dipendono da lui. È il vocabolario condiviso, ed è il
   motivo per cui i layer si parlano senza conoscersi.
 - **`indexing/index.py` non importa nessun backend.** Importa `storing` e `authorization`, non
-  Qdrant: è la ABC che rende possibile aggiungere la famiglia `relation/` (grafo) senza toccare
-  niente della famiglia `similarity/`.
+  Qdrant: è la ABC che ha reso possibile aggiungere la famiglia `relation/` (grafo) senza toccare
+  niente della famiglia `similarity/` — e la sola riga che è servita cambiare in `BaseIndex` è
+  l'over-fetch, che non nomina nessuna delle due.
+
+L'arco `indexing -> generation` è l'unico aggiunto dal grafo: l'estrattore di relazioni consuma un
+`BaseLLMClient`, esattamente come il `SemanticIndex` consuma un `BaseEmbedder`.
 
 ---
 
@@ -397,7 +406,7 @@ divisione dei compiti in scrittura è netta:
 #### La famiglia `similarity/`
 
 Lo split fra famiglie di index è **per come si assegna la rilevanza**: `similarity` valuta ogni chunk
-per conto suo rispetto alla query, `relation` (previsto, il grafo) lo valuta per le sue relazioni.
+per conto suo rispetto alla query, `relation` (il grafo) lo valuta per le sue relazioni.
 
 `SimilarityIndex` contiene la meccanica Qdrant condivisa: point id (`uuid5` del `chunk.id`, così il
 re-insert fa upsert in place), payload (`chunk_id` per risolvere, `source_id` per cancellare),
@@ -412,9 +421,47 @@ della collection e `_query_vector`. Così il denso e lo sparso **non possono div
 Il payload dell'index porta *solo ciò su cui l'index deve agire senza leggere lo store*. Non porta
 il testo: quello sta nello store, e duplicarlo vorrebbe dire tenerne allineate due copie.
 
+#### La famiglia `relation/`
+
+Il vector store resta l'indice principale; il grafo ci sta sopra e serve **solo** a espandere il
+contesto. I nodi sono *sottoconcetti* fusi per nome — è la fusione a creare i ponti — e gli archi
+collegano chunk diversi legati da una relazione esplicita. Il guadagno è dove quei chunk **non sono
+semanticamente simili**, perché lì la similarità da sola non li avrebbe mai messi insieme.
+
+`RelationIndex` tiene ciò che fa dei tier una famiglia: come una query diventa **semi** e come una
+traversata diventa uno **score**. A differenza di `SimilarityIndex`, che è un solo client Qdrant
+costruito in tre modi, qui non c'è altro da condividere — una visita in-process e una traversata
+Cypher sono motori diversi davvero.
+
+| | scelta | conseguenza |
+|---|---|---|
+| **semi** | ricerca propria sui nomi dei nodi | se li chiedesse al `SemanticIndex`, le liste che arrivano al `FusionRanker` non sarebbero più indipendenti e la corroborazione che RRF premia diventerebbe in parte auto-correlazione |
+| **score** | `seed * decay ** hop` | monotono, un parametro — e **vincola il ranker a RRF**: il numero non è commensurabile con coseno e BM25 |
+| **determinismo** | temperatura 0, prompt e modello impacchettati in `LLMExtractor.version`, grafo ricostruito per sorgente (`delete` poi `insert`) | la re-ingestione resta neutra anche se l'estrattore è un LLM |
+| **ABAC** | traversata libera, filtro solo sui chunk finali | un solo punto di enforcement, quello di sempre. Il prezzo è accettato e scritto sotto |
+
+L'estrattore è **iniettato**, come l'embedder nel `SemanticIndex`: produce la rappresentazione di
+questo index, quindi `IngestionPipeline` non cambia e non sa che esista. Un chunk la cui estrazione
+fallisce viene saltato e loggato — è il principio 6, applicato al dato singolo.
+
+**Il grafo non filtra, di proposito.** Espande liberamente e `retrieve` applica il predicato una
+volta sola, come per gli altri due. Mettere gli attributi sugli archi e controllare a ogni hop darebbe
+un'espansione dimostrabilmente chiusa, al prezzo di un **secondo punto di enforcement** da tenere
+allineato al primo — ed è esattamente il tipo di duplicazione che diverge in silenzio. Il costo
+accettato: un cammino che passa per chunk vietati può far risalire in classifica un chunk
+*autorizzato*, quindi l'ordinamento di ciò che vedi dipende in parte da ciò che non vedi. È un
+**canale inferenziale, non un leak di contenuto** — `_search` restituisce solo id e score, e i nodi
+intermedi non sono osservabili.
+
+È anche l'unico posto in cui «mai post-filtering» è derogato consapevolmente, e solo per lo stadio di
+espansione, dove costa bonus mancati e non risultati primari mancati. A pagarlo è l'**over-fetch**:
+`_search` chiede più candidati del budget del chiamante e `retrieve` taglia a `top_i` *dopo* il
+check, così un candidato non autorizzato non consuma uno slot in silenzio.
+
 ### 6.3 I tre tier, e perché si chiamano così
 
-Ogni index esiste in tre varianti che **differiscono solo in come viene costruito il client Qdrant**:
+Ogni index per similarità esiste in tre varianti che **differiscono solo in come viene costruito il
+client Qdrant**:
 
 | classe | costruzione | uso |
 |---|---|---|
@@ -424,6 +471,11 @@ Ogni index esiste in tre varianti che **differiscono solo in come viene costruit
 
 Il nome dice la **garanzia** (dura? è condiviso?), non il prodotto. Il giorno in cui il motore denso
 non fosse più Qdrant, il codice chiamante non cambierebbe una riga.
+
+Il grafo ne ha due invece di tre — `VolatileGraphIndex` su networkx e `RemoteGraphIndex` su Neo4j —
+e per una ragione che non vale per gli altri: un graph database non ha l'equivalente del `:memory:`
+di Qdrant, quindi il tier in-process è venuto per primo (senza, ogni test del grafo richiederebbe un
+container) e il tier di mezzo non ha un motore ovvio da usare.
 
 La configurazione coerente è quella in cui store e index stanno sullo **stesso tier**: uno store
 volatile con un index remoto sopravvive al riavvio come un insieme di id che non risolvono più
@@ -435,7 +487,7 @@ niente.
 
 ```mermaid
 flowchart LR
-    q[/"query"/] -->|"str"| BM["LexicalIndex<br>(Qdrant, BM25/IDF)"] & VR["SemanticIndex<br>(Qdrant, cosine)"] & GR["GraphIndex<br>(previsto)"]
+    q[/"query"/] -->|"str"| BM["LexicalIndex<br>(Qdrant, BM25/IDF)"] & VR["SemanticIndex<br>(Qdrant, cosine)"] & GR["GraphIndex<br>(networkx/Neo4j)"]
     q -- str --> AUG["PromptAugmenter"]
     VR -- list[ScoredChunk] --> F["FusionRanker<br>(RRF/RSF/DBSF)"]
     BM -- list[ScoredChunk] --> F
@@ -468,13 +520,20 @@ Tre soglie, tre stadi, costi crescenti per documento:
 
 | soglia | dove | default | significato |
 |---|---|---|---|
-| `top_i` | per **ogni** index | 20 | quanti candidati tira su ciascun retriever |
+| `top_i` | per **ogni** index | 20 | quanti candidati **autorizzati** tira su ciascun retriever |
 | `top_k` | dopo la fusione | 10 | quanti sopravvivono al merge, e vanno al reranker |
 | `top_n` | dopo il reranking | 5 | il contesto finale che vede l'LLM |
 
 Il reranker è un cross-encoder: costa una forward pass per **coppia** (query, chunk), quindi non lo
 si può puntare su tutto il corpus. L'imbuto esiste perché i primi due stadi sono economici e
 selettivi, e il terzo è caro e preciso.
+
+`top_i` conta risultati **autorizzati**, non candidati grezzi: `retrieve` taglia la lista a `top_i`
+*dopo* il filtro. La differenza si vede solo negli index che non sanno restringere i candidati da
+soli — oggi il grafo — che possono chiederne di più e lasciare il taglio a `retrieve`. Per gli index
+per similarità la distinzione non morde, perché il loro `_search` ne restituisce già al massimo
+`top_i`: lì un candidato non autorizzato costa ancora uno slot, ed è il recall che si paga finché il
+pushdown non esiste.
 
 ### 7.2 Fusion ranker — mettere insieme liste incommensurabili
 
@@ -498,9 +557,11 @@ Due dettagli che sembrano minori e non lo sono:
 - `_search` deve restituire id **unici**: un chunk che comparisse due volte nella stessa lista
   verrebbe contato due volte dalla fusione.
 
-*(Conseguenza per il grafo: uno score di traversata non è commensurabile con coseno e BM25, e RSF/DBSF
-normalizzano sulla forma della sua curva. Introdurre il grafo di fatto vincola a RRF — vedi
-[roadmap/graph.md](roadmap/graph.md).)*
+**Il grafo rende questo vincolante, non teorico.** Lo score di una traversata (`seed * decay ** hop`)
+non è commensurabile con coseno e BM25, e RSF/DBSF normalizzerebbero sulla forma della curva di
+decadimento — cioè darebbero al grafo il peso che quella curva implica, non quello che vale. **Con un
+`RelationIndex` nella lista degli index, il fusion ranker dev'essere RRF.** Nessun controllo a runtime
+lo impone: cambiarlo non solleva, degrada in silenzio. Toglierlo dalle opinioni richiede l'harness.
 
 ### 7.3 Augmentation e generation
 
@@ -680,15 +741,18 @@ Tabella di lettura rapida: dove si aggancia una cosa nuova, e cosa **non** va to
 | una nuova strategia di taglio | `BaseChunker` | `_make_chunk` costruisce id e metadata |
 | una nuova origine di attributi | `BaseLabeler._attributes` | validazione e scrittura sono condivise |
 | un nuovo modello di embedding | `BaseEmbedder` | il `SemanticIndex` lo riceve iniettato |
+| un nuovo estrattore di relazioni | `BaseExtractor` | il `RelationIndex` lo riceve iniettato, come l'embedder |
 | un nuovo backend di storage | `BaseStore` | gli index conoscono solo la ABC |
-| **una nuova famiglia di retrieval** (il grafo) | `BaseIndex` | `BaseIndex` non importa nessun backend; la `QueryPipeline` non cambia |
+| **una nuova famiglia di retrieval** | `BaseIndex` | `BaseIndex` non importa nessun backend; la `QueryPipeline` non cambia |
+| un nuovo motore di grafo | `RelationIndex` (`_add`, `_seeds`, `_expand`, `delete`) | semi e funzione di score stanno nella ABC, quindi due tier non possono divergere |
 | una nuova strategia di fusione | `FusionRanker` | riceve `list[list[ScoredChunk]]` |
 | un nuovo LLM | `BaseLLMClient` | consuma `list[Message]`, neutro |
 
-Il caso più importante è la riga in grassetto: il `GraphIndex` entrerà come un `BaseIndex` qualsiasi
-— `insert`/`delete`/`retrieve`, solo id più la sua rappresentazione, chunk risolti dallo store
-condiviso, `list[ScoredChunk]` al `FusionRanker`. **Nessun trattamento speciale nella pipeline.**
-Questa proprietà è il motivo per cui lo split store/index è stato fatto quando è stato fatto.
+La riga in grassetto è quella che è stata messa alla prova: il grafo è entrato come un `BaseIndex`
+qualsiasi — `insert`/`delete`/`retrieve`, solo id più la sua rappresentazione, chunk risolti dallo
+store condiviso, `list[ScoredChunk]` al `FusionRanker` — e **nessun trattamento speciale nella
+pipeline**. È il motivo per cui lo split store/index è stato fatto quando è stato fatto. L'unica
+riga cambiata in `BaseIndex` è stata l'over-fetch, e non nomina il grafo.
 
 ---
 
@@ -697,15 +761,41 @@ Questa proprietà è il motivo per cui lo split store/index è stato fatto quand
 Test unitari con `pytest` sotto `test/`, in parallelo alla struttura del sorgente. Le scelte che
 li rendono possibili sono le stesse che rendono sano il design:
 
-- **Il tier volatile è vero.** Qdrant `:memory:` e `VolatileStore` fanno girare store e index per
-  intero in-process — non un mock, il codice reale con un client diverso.
+- **Il tier volatile è vero.** Qdrant `:memory:`, `VolatileStore` e il grafo networkx fanno girare
+  store e index per intero in-process — non un mock, il codice reale con un motore diverso. Per il
+  grafo non è una comodità ma la ragione per cui quel tier è stato scritto per primo: senza, ogni
+  test del grafo richiederebbe un container.
 - **Le connessioni sono iniettabili.** `PersistentStore` accetta una `sqlite3.Connection`
-  (`:memory:` nei test), `RemoteStore` una `psycopg.Connection`.
+  (`:memory:` nei test), `RemoteStore` una `psycopg.Connection`, `RemoteGraphIndex` un `Driver`
+  Neo4j.
 - **`evaluate` è una funzione pura**, quindi la semantica del filtro si testa senza nessuna
   infrastruttura — ed è anche l'oracolo con cui si verificherà il pushdown quando ci sarà.
+- **L'albero dei test rispecchia quello dei sorgenti**, e può farlo alla lettera: `similarity/` e
+  `relation/` hanno ciascuno il proprio `index.py`, quindi hanno ciascuno il proprio
+  `test_index.py`. Regge grazie a `--import-mode=importlib` in `pyproject.toml`, che identifica un
+  modulo di test dal **percorso** invece che dal basename — con la modalità di default i due
+  `test_index.py` collidono in fase di collection. Nessun `__init__.py`: i package sono namespace
+  package, come nei sorgenti.
+
+I due tier che richiedono un server sono dietro una variabile d'ambiente e vengono saltati senza:
+`AUTH_RAG_TEST_PG` per `RemoteStore`, `AUTH_RAG_TEST_NEO4J` per `RemoteGraphIndex`.
+
+**La parità fra tier è verificata, non dichiarata.** Per il grafo l'affermazione "i tier
+differiscono solo nella tecnologia, mai nel comportamento" è più forte che altrove — una visita
+in-process e una traversata Cypher non condividono una riga di codice — quindi le quattordici
+proprietà che contano (il ponte fra chunk, il limite di hop, la normalizzazione dei nomi, il
+punteggio dei semi, l'idempotenza, `delete`, e il comportamento sotto filtro) sono scritte una volta
+e **parametrizzate sui due tier**. Con un Neo4j acceso girano su entrambi:
+
+```bash
+docker run -d -p 7688:7687 -e NEO4J_AUTH=neo4j/testpassword neo4j:5-community
+AUTH_RAG_TEST_NEO4J=bolt://localhost:7688 AUTH_RAG_TEST_NEO4J_PASSWORD=testpassword uv run pytest
+```
 
 Copertura più densa dove il costo di sbagliare è più alto: `authorization/` (40 test fra schema e
-filtro) e `indexing/index.py` (16, quasi tutti sulle combinazioni schema/filtro del capitolo 8.3).
+filtro), `indexing/index.py` (16, quasi tutti sulle combinazioni schema/filtro del capitolo 8.3) e
+`indexing/relation/` (43, fra parsing dell'estrattore, funzione di score e comportamento del grafo
+sotto filtro).
 
 ---
 
@@ -715,12 +805,14 @@ Onestà su ciò che questo documento **non** descrive, perché non esiste:
 
 | | stato | dove |
 |---|---|---|
-| **Grafo di espansione** (la tesi) | nessun package `relation/`; decisioni prese, una aperta blocca l'inizio | [roadmap/graph.md](roadmap/graph.md) |
+| **Tier `Persistent` del grafo** | il grafo ne ha due invece di tre: networkx non ha un on-disk e Neo4j non ha un embedded Python | [roadmap/graph.md](roadmap/graph.md) |
 | **PEP** (`compile_filter(subject, action, env) -> Filter`) | fuori dalla libreria per costruzione: ha bisogno dell'identità verificata | [roadmap/sources-abac.md](roadmap/sources-abac.md) |
 | **PDP XACML esterno** | il filtro arriverà come *obligation*; soffitto noto: solo congiunzioni | [roadmap/sources-abac.md](roadmap/sources-abac.md#pdp-esterno-xacml-il-filtro-arriva-come-obligation) |
 | **Pushdown del filtro nel payload dell'index** | additivo: cambia il recall e le prestazioni, non *se* il filtro c'è | [roadmap/sources-abac.md](roadmap/sources-abac.md) |
 | **Gateway FHIR** | altra repo; la libreria lo consuma già via `ApiLoader` | [roadmap/sources-abac.md](roadmap/sources-abac.md) |
 | **Harness di valutazione** (recall@k, nDCG) | **blocco trasversale**: senza, RRF contro DBSF, quanto valga il reranker e se il grafo paghi restano opinioni | [roadmap/graph.md](roadmap/graph.md#cosa-manca-per-sapere-se-il-grafo-paga) |
 
-L'ultima riga è quella che condiziona le altre: la sequenza sensata mette l'harness **prima** del
-grafo, non dopo.
+L'ultima riga resta la più pesante, e adesso lo è più di prima: la sequenza sensata metteva
+l'harness **prima** del grafo, ed è andata al contrario. Il grafo c'è e funziona; se *paghi*
+costruirlo — un LLM per chunk in ingestion, più la traversata a query time — non lo sappiamo, e non
+lo sapremo finché recall@k e nDCG non esistono.
