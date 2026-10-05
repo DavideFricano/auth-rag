@@ -144,3 +144,11 @@ def test_a_multi_valued_attribute_must_arrive_as_a_collection():
         PropagatingLabeler(_SCHEMA).label(
             _document(access={"tenant": "acme", "care_team": "icu"})
         )
+
+
+def test_relabel_applies_the_same_rule_to_a_source_already_ingested(tmp_path):
+    """A manifest still wins over what arrived, as it does at ingestion."""
+    path = _manifest(tmp_path, '{"sources": {"report.pdf": {"tenant": "acme"}}}')
+    source = _document(access={"tenant": "globex"}).source
+
+    assert ManifestLabeler(_SCHEMA, path).relabel(source).access == {"tenant": "acme"}

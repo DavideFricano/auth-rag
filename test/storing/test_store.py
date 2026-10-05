@@ -42,6 +42,12 @@ def test_delete_by_source(store):
     assert [c.id for c in store.get(["a0", "b0"])] == ["b0"]
 
 
+def test_get_by_source(store):
+    store.add([_chunk("a0", "t", "doc1"), _chunk("a1", "t", "doc1"), _chunk("b0", "t", "doc2")])
+    assert {c.id for c in store.get_by_source("doc1")} == {"a0", "a1"}
+    assert store.get_by_source("nope") == []
+
+
 def test_persistent_survives_reopening_same_db(tmp_path):
     db = str(tmp_path / "store.db")
     PersistentStore(connection=sqlite3.connect(db)).add([_chunk("c0", "t0")])

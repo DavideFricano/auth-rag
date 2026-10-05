@@ -27,6 +27,10 @@ class BaseStore(ABC):
         """Resolve ids to chunks; missing ids are skipped, not an error."""
 
     @abstractmethod
+    def get_by_source(self, source_id: str) -> list[Chunk]:
+        """Every chunk whose ``metadata.source.id`` matches; empty for an unknown source."""
+
+    @abstractmethod
     def delete(self, source_id: str) -> None:
         """Remove every chunk whose ``metadata.source.id`` matches (idempotent)."""
 
@@ -43,6 +47,9 @@ class VolatileStore(BaseStore):
 
     def get(self, ids: list[str]) -> list[Chunk]:
         return [self._chunks[id_] for id_ in ids if id_ in self._chunks]
+
+    def get_by_source(self, source_id: str) -> list[Chunk]:
+        return [chunk for chunk in self._chunks.values() if chunk.metadata.source.id == source_id]
 
     def delete(self, source_id: str) -> None:
         self._chunks = {
@@ -79,6 +86,10 @@ class PersistentStore(BaseStore):
             return []
         placeholders = ",".join("?" * len(ids))
         rows = self.conn.execute(f"SELECT data FROM chunks WHERE id IN ({placeholders})", ids).fetchall()
+        return [Chunk.model_validate_json(data) for (data,) in rows]
+
+    def get_by_source(self, source_id: str) -> list[Chunk]:
+        rows = self.conn.execute("SELECT data FROM chunks WHERE source_id = ?", (source_id,)).fetchall()
         return [Chunk.model_validate_json(data) for (data,) in rows]
 
     def delete(self, source_id: str) -> None:
@@ -120,6 +131,12 @@ class RemoteStore(BaseStore):
             return []
         with self.conn.cursor() as cur:
             cur.execute("SELECT data FROM chunks WHERE id = ANY(%s)", (list(ids),))
+            rows = cur.fetchall()
+        return [Chunk.model_validate_json(data) for (data,) in rows]
+
+    def get_by_source(self, source_id: str) -> list[Chunk]:
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT data FROM chunks WHERE source_id = %s", (source_id,))
             rows = cur.fetchall()
         return [Chunk.model_validate_json(data) for (data,) in rows]
 

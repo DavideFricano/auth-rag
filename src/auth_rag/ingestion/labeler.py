@@ -7,7 +7,7 @@ from pathlib import Path
 
 from auth_rag.authorization.schema import AccessSchema
 from auth_rag.errors import ConformanceError, DeclarationError
-from auth_rag.types import Document
+from auth_rag.types import Document, Source
 
 
 class BaseLabeler(ABC):
@@ -25,24 +25,29 @@ class BaseLabeler(ABC):
         self.schema = schema
 
     @abstractmethod
-    def _attributes(self, document: Document) -> Mapping[str, object]:
-        """The raw attributes for this document, before validation."""
+    def _attributes(self, source: Source) -> Mapping[str, object]:
+        """The raw attributes for this source, before validation."""
 
     def label(self, document: Document) -> Document:
-        """A copy of the document whose ``source.access`` holds the validated attributes.
+        """A copy of the document whose ``source.access`` holds the validated attributes."""
+        return document.model_copy(update={"source": self.relabel(document.source)})
+
+    def relabel(self, source: Source) -> Source:
+        """A copy of the source whose ``access`` holds the validated attributes.
+
+        What ``label`` does to a document arriving, done to a source already ingested:
+        the attributes changed upstream, the text did not.
 
         Attributes that are invalid or missing raise rather than being skipped: unlike a
         corrupt file, they mean the producer and the declaration disagree. The failure
         carries the document id, which the schema cannot know.
         """
         try:
-            access = self.schema.validate_access(self._attributes(document))
+            access = self.schema.validate_access(self._attributes(source))
         except ConformanceError as error:
             # the schema knows the vocabulary, only this side knows which document
-            raise ConformanceError(f"document {document.source.id!r}: {error}") from error
-        return document.model_copy(
-            update={"source": document.source.model_copy(update={"access": access})}
-        )
+            raise ConformanceError(f"document {source.id!r}: {error}") from error
+        return source.model_copy(update={"access": access})
 
 
 class PropagatingLabeler(BaseLabeler):
@@ -52,8 +57,8 @@ class PropagatingLabeler(BaseLabeler):
     this adds no values — it is the boundary where what came from outside is checked.
     """
 
-    def _attributes(self, document: Document) -> Mapping[str, object]:
-        return document.source.access
+    def _attributes(self, source: Source) -> Mapping[str, object]:
+        return source.access
 
 
 class ManifestLabeler(BaseLabeler):
@@ -77,8 +82,8 @@ class ManifestLabeler(BaseLabeler):
         self.default: dict = manifest.get("default", {})
         self.sources: dict = manifest.get("sources", {})
 
-    def _attributes(self, document: Document) -> Mapping[str, object]:
-        return {**self.default, **self.sources.get(document.source.id, {})}
+    def _attributes(self, source: Source) -> Mapping[str, object]:
+        return {**self.default, **self.sources.get(source.id, {})}
 
 
 class StaticLabeler(BaseLabeler):
@@ -92,5 +97,5 @@ class StaticLabeler(BaseLabeler):
         super().__init__(schema)
         self.attributes = dict(attributes)
 
-    def _attributes(self, document: Document) -> Mapping[str, object]:
+    def _attributes(self, source: Source) -> Mapping[str, object]:
         return self.attributes

@@ -21,14 +21,14 @@ from auth_rag.augmentation.augmenter import PromptAugmenter
 from auth_rag.authorization.filter import Match
 from auth_rag.authorization.schema import AccessSchema, Attribute, AttributeType
 from auth_rag.embedding.embedder import BaseEmbedder
-from auth_rag.errors import EnforcementError
+from auth_rag.errors import ConformanceError, EnforcementError
 from auth_rag.generation.llm import BaseLLMClient
 from auth_rag.indexing.relation.extractor import BaseExtractor, Triple
 from auth_rag.indexing.relation.graph_index import VolatileGraphIndex
 from auth_rag.indexing.similarity.lexical_index import VolatileLexicalIndex
 from auth_rag.indexing.similarity.semantic_index import VolatileSemanticIndex
 from auth_rag.ingestion.chunker import BaseChunker
-from auth_rag.ingestion.labeler import StaticLabeler
+from auth_rag.ingestion.labeler import PropagatingLabeler, StaticLabeler
 from auth_rag.ingestion.loader import BaseLoader
 from auth_rag.pipeline import RagPipeline
 from auth_rag.ranking.fusion_ranker import ReciprocalRankFusionRanker
@@ -202,12 +202,59 @@ def test_delete_fans_out_to_every_index_and_store():
     rag, store, _ = _build(top_i=10, top_k=10, top_n=10)
     rag.ingest_pipeline.ingest()
 
-    rag.ingest_pipeline.remove("doc1")
+    rag.ingest_pipeline.remove(["doc1"])
 
     context = rag.query_pipeline.retrieve("febbre")
     assert all(sc.chunk.metadata.source.id != "doc1" for sc in context)  # gone from the indices
     assert store.get(["c0"]) == []  # and the record was dropped from the store
     assert store.get(["c2"])  # doc2 is untouched
+
+
+def test_ingest_without_a_loader_takes_the_documents_given():
+    rag, store, _ = _build(top_i=10, top_k=10, top_n=10)
+    rag.ingest_pipeline.loader = None
+
+    rag.ingest_pipeline.ingest([_DOCS[0]])
+
+    context = rag.query_pipeline.retrieve("febbre")
+    assert {sc.chunk.metadata.source.id for sc in context} == {"doc1"}
+    assert store.get(["c2"]) == []  # only what was given
+
+
+def test_ingesting_a_new_version_replaces_the_old_chunks():
+    """The edited text hashes to new chunk ids, so an upsert alone would keep the old
+    ones next to them."""
+    rag, store, _ = _build(top_i=10, top_k=10, top_n=10)
+    rag.ingest_pipeline.ingest()
+    rag.ingest_pipeline.loader = None
+    rag.ingest_pipeline.chunker = _FakeChunker(
+        _CHUNKS | {"doc1": [_chunk("c0-v2", "febbre passata", _SRC1)]}
+    )
+
+    rag.ingest_pipeline.ingest([_DOCS[0]])
+
+    assert store.get(["c0", "c1"]) == []
+    assert all(sc.chunk.id not in {"c0", "c1"} for sc in rag.query_pipeline.retrieve("febbre"))
+    assert store.get(["c0-v2"]) and store.get(["c2"])  # the new version is in, doc2 untouched
+
+
+def test_a_document_given_overrides_the_one_the_loader_yields():
+    """Both versions of doc1 in one batch: only the last is kept, not a mix of the two."""
+    rag, store, _ = _build(top_i=10, top_k=10, top_n=10)
+    v2 = Document(text="febbre passata", source=_SRC1)
+    rag.ingest_pipeline.chunker = _SourceChunker()
+
+    rag.ingest_pipeline.ingest([v2])
+
+    assert [c.text for c in store.get_by_source("doc1")] == ["febbre passata"]
+
+
+def test_remove_refuses_a_single_string():
+    """A string is a collection too: ``remove("doc1")`` would drop "d", "o", "c", "1"."""
+    rag, _, _ = _build(top_i=10, top_k=10, top_n=10)
+
+    with pytest.raises(TypeError):
+        rag.ingest_pipeline.remove("doc1")
 
 
 # --- ABAC end to end: what the labeler writes at ingestion is what the filter reads -------
@@ -389,3 +436,63 @@ def test_an_index_wired_without_the_schema_refuses_the_whole_query():
 
     with pytest.raises(EnforcementError, match="filtering needs the AccessSchema"):
         rag.query_pipeline.retrieve("febbre", Match(attribute="tenant", values={"acme"}))
+
+
+def test_a_rejected_new_version_leaves_the_old_one_in_place():
+    """The labeler refuses before anything is removed, so a bad ingest does not delete the
+    document it was meant to update."""
+    rag = _abac_pipeline(StaticLabeler(_ABAC_SCHEMA, {"tenant": "acme"}))
+    rag.ingest_pipeline.ingest()
+    rag.ingest_pipeline.loader = None
+    rag.ingest_pipeline.labeler = PropagatingLabeler(_ABAC_SCHEMA)  # _DOCS carry no tenant
+
+    with pytest.raises(ConformanceError):
+        rag.ingest_pipeline.ingest([_DOCS[0]])
+
+    acme = Match(attribute="tenant", values={"acme"})
+    assert "doc1:0" in _ids(rag.query_pipeline.retrieve("febbre", acme))
+
+
+def test_update_moves_a_document_under_the_new_attributes():
+    """The business unit changed upstream: the next query sees the document where it now
+    belongs, and no longer where it was."""
+    rag = _abac_pipeline(StaticLabeler(_ABAC_SCHEMA, {"tenant": "acme"}))
+    rag.ingest_pipeline.ingest()
+    rag.ingest_pipeline.labeler = PropagatingLabeler(_ABAC_SCHEMA)
+
+    updated = rag.ingest_pipeline.update({"doc1": {"access": {"tenant": "globex"}}})
+
+    assert [c.metadata.source.access for c in updated] == [{"tenant": "globex"}]
+    assert updated[0].metadata.source.name == "doc1.pdf"  # what was not given is kept
+    acme, globex = (Match(attribute="tenant", values={t}) for t in ("acme", "globex"))
+    assert _ids(rag.query_pipeline.retrieve("febbre", acme)) == {"doc2:0"}
+    assert _ids(rag.query_pipeline.retrieve("febbre", globex)) == {"doc1:0"}
+
+
+def test_update_checks_every_source_before_writing_any():
+    rag = _abac_pipeline(StaticLabeler(_ABAC_SCHEMA, {"tenant": "acme"}))
+    rag.ingest_pipeline.ingest()
+    rag.ingest_pipeline.labeler = PropagatingLabeler(_ABAC_SCHEMA)
+
+    with pytest.raises(ConformanceError, match="doc2"):
+        rag.ingest_pipeline.update(
+            {"doc1": {"access": {"tenant": "globex"}}, "doc2": {"access": {"tenant": 42}}}
+        )
+
+    acme = Match(attribute="tenant", values={"acme"})
+    assert _ids(rag.query_pipeline.retrieve("febbre", acme)) == {"doc1:0", "doc2:0"}
+
+
+@pytest.mark.parametrize("field", ["id", "text", "acess"])
+def test_update_refuses_what_it_cannot_change(field):
+    rag = _abac_pipeline(StaticLabeler(_ABAC_SCHEMA, {"tenant": "acme"}))
+    rag.ingest_pipeline.ingest()
+
+    with pytest.raises(ValueError, match=field):
+        rag.ingest_pipeline.update({"doc1": {field: "x"}})
+
+
+def test_update_skips_an_unknown_source():
+    rag = _abac_pipeline(StaticLabeler(_ABAC_SCHEMA, {"tenant": "acme"}))
+
+    assert rag.ingest_pipeline.update({"nope": {"name": "x"}}) == []

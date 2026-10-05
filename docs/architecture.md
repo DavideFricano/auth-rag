@@ -351,6 +351,11 @@ e la dichiarazione, e riguarda l'intero corpus. Accettare un documento privo deg
 `required` significherebbe scrivere qualcosa che si sa già di non poter mai restituire, rimandando il
 sintomo a query time sotto forma di lista vuota indistinguibile da un deny legittimo.
 
+`relabel(source)` fa la stessa cosa su una sorgente già ingerita: gli attributi sono cambiati a monte
+(la BU di un documento, per esempio), il testo no. Lo usa `IngestionPipeline.update`, che riscrive il
+`Source` sui chunk nello **store**: gli index non tengono attributi, l'enforcement li legge dallo
+store. Con un pushdown nel payload degli index andrebbero riscritti anche lì.
+
 Il labeler è **opzionale**: senza `AccessSchema` non c'è ABAC e non c'è labeler. Vedi il capitolo 8.
 
 ### 5.5 Chunker — `Document -> list[Chunk]`
@@ -398,8 +403,13 @@ nella base**, dove vive l'enforcement: stando lì, nessun autore di un nuovo ind
 Un index tiene **solo id più la propria rappresentazione** e **non scrive mai lo store**. La
 divisione dei compiti in scrittura è netta:
 
-- `IngestionPipeline.ingest` scrive lo store **una volta**, poi dice a ogni index di indicizzare gli
-  stessi chunk.
+- `IngestionPipeline.ingest(docs)` prende ciò che dà il loader, se c'è, e poi `docs`: scrive lo store
+  **una volta**, poi dice a ogni index di indicizzare gli stessi chunk. Ingerire un documento
+  **sostituisce** ciò che la sua sorgente aveva: l'id del chunk contiene l'hash del testo, quindi un
+  upsert lascerebbe i chunk di una versione vecchia, con gli attributi vecchi.
+- `IngestionPipeline.update({source_id: campi})` cambia ciò che un documento porta oltre al testo
+  (qualunque campo del `Source` tranne `id`, che è la chiave) solo nello **store**: senza riconvertire né rifare
+  embedding, perché gli index non lo tengono.
 - `IngestionPipeline.remove` fa il contrario: prima toglie gli id da **ogni** index, poi cancella i
   record dallo store. Nessun id pendente, nessun orfano.
 
