@@ -230,6 +230,21 @@ def test_delete_then_insert_rebuilds_the_source_cleanly(build):
     assert set(dict(index._search("budesonide", top_i=10))) == {"c0"}
 
 
+def _concepts(index) -> set[str]:
+    if isinstance(index, VolatileGraphIndex):
+        return set(index.graph.nodes)
+    return {row["name"] for row in index._run("MATCH (n:Concept) RETURN n.name AS name")}
+
+
+def test_delete_removes_the_nodes_left_with_nothing(build):
+    index = build(
+        [_chunk("c0", "doc1"), _chunk("c1", "doc2")],
+        {"c0": [("colite", "p", "steroidi")], "c1": [("colite", "p", "ctcae")]},
+    )
+    index.delete("doc1")
+    assert _concepts(index) == {"colite", "ctcae"}  # "steroidi" was doc1's alone
+
+
 # --- access control: the graph does not filter, ``retrieve`` does ----------------------
 
 
@@ -314,13 +329,3 @@ def test_two_chunks_stating_the_same_pair_keep_both_provenances():
         {"c0": [("colite", "p", "steroidi")], "c1": [("colite", "p", "steroidi")]},
     )
     assert index.graph.number_of_edges() == 2
-
-
-def test_delete_removes_the_nodes_left_with_nothing():
-    index = _volatile(
-        [_chunk("c0", "doc1"), _chunk("c1", "doc2")],
-        {"c0": [("colite", "p", "steroidi")], "c1": [("colite", "p", "ctcae")]},
-    )
-    index.delete("doc1")
-    assert "steroidi" not in index.graph  # only doc1 ever named it
-    assert "colite" in index.graph  # doc2 named it too, so it survives

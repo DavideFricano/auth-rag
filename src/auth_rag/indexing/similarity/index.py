@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import warnings
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -38,6 +39,21 @@ class SimilarityIndex(BaseIndex, ABC):
     @abstractmethod
     def _query_vector(self, query: str) -> tuple[Any, str | None]:
         """The value to search with and the named vector to use (None = the unnamed one)."""
+
+    def _create_collection(self, **config: Any) -> None:
+        """Create the collection with ``source_id`` indexed, or ``delete`` scans every point.
+
+        A local client has no payload indexes and warns that the call has no effect; it is
+        made anyway, so the three tiers stay identical but for how the client is built.
+        """
+        self.db.create_collection(collection_name=self.collection, **config)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="Payload indexes have no effect")
+            self.db.create_payload_index(
+                collection_name=self.collection,
+                field_name="source_id",
+                field_schema=models.PayloadSchemaType.KEYWORD,
+            )
 
     def _point(self, chunk: Chunk, vector: Any) -> models.PointStruct:
         """One point per chunk: the id is a uuid5 of ``chunk.id`` so re-inserting upserts

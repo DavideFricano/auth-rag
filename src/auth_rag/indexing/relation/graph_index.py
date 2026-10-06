@@ -158,6 +158,13 @@ class RemoteGraphIndex(RelationIndex):
         self._run(
             "CREATE CONSTRAINT chunk_id IF NOT EXISTS FOR (c:Chunk) REQUIRE c.id IS UNIQUE"
         )
+        self._run(  # and without these, every delete
+            "CREATE INDEX chunk_source_id IF NOT EXISTS FOR (c:Chunk) ON (c.source_id)"
+        )
+        self._run(
+            "CREATE INDEX related_source_id IF NOT EXISTS "
+            "FOR ()-[r:RELATED]-() ON (r.source_id)"
+        )
 
     def _add(self, relations: Sequence[Relation]) -> None:
         if not relations:
@@ -193,11 +200,25 @@ class RemoteGraphIndex(RelationIndex):
         )
 
     def delete(self, source_id: str) -> None:
+        """Orphans are looked for only among the concepts this source's chunks named:
+        sweeping every concept on each delete would cost a scan of the graph per document."""
+        self._ensure_constraints()
         self._run(
             "MATCH ()-[r:RELATED {source_id: $source_id}]->() DELETE r", source_id=source_id
         )
-        self._run("MATCH (c:Chunk {source_id: $source_id}) DETACH DELETE c", source_id=source_id)
-        self._run("MATCH (n:Concept) WHERE NOT (n)-[:READ_IN]->(:Chunk) DETACH DELETE n")
+        self._run(
+            """
+            MATCH (c:Chunk {source_id: $source_id})
+            OPTIONAL MATCH (n:Concept)-[:READ_IN]->(c)
+            WITH collect(DISTINCT n) AS touched, collect(DISTINCT c) AS chunks
+            FOREACH (c IN chunks | DETACH DELETE c)
+            WITH touched
+            UNWIND touched AS n
+            WITH n WHERE NOT (n)-[:READ_IN]->(:Chunk)
+            DETACH DELETE n
+            """,
+            source_id=source_id,
+        )
 
     def _seeds(self, query_terms: set[str]) -> dict[str, float]:
         if not query_terms:

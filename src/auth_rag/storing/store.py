@@ -62,7 +62,7 @@ class VolatileStore(BaseStore):
 class PersistentStore(BaseStore):
     """Durable local chunk store backed by SQLite (single file, stdlib, single process).
 
-    A ``source_id`` column makes ``delete`` a one-statement drop. Pass a custom connection
+    A ``source_id`` column, indexed, makes ``delete`` a one-statement drop. Pass a custom connection
     to override storage (e.g. an in-memory ``:memory:`` one in tests).
     """
 
@@ -72,6 +72,7 @@ class PersistentStore(BaseStore):
             "CREATE TABLE IF NOT EXISTS chunks "
             "(id TEXT PRIMARY KEY, source_id TEXT NOT NULL, data TEXT NOT NULL)"
         )
+        self.conn.execute("CREATE INDEX IF NOT EXISTS chunks_source_id ON chunks (source_id)")
         self.conn.commit()
 
     def add(self, chunks: list[Chunk]) -> None:
@@ -115,6 +116,7 @@ class RemoteStore(BaseStore):
             "CREATE TABLE IF NOT EXISTS chunks "
             "(id TEXT PRIMARY KEY, source_id TEXT NOT NULL, data TEXT NOT NULL)"
         )
+        self.conn.execute("CREATE INDEX IF NOT EXISTS chunks_source_id ON chunks (source_id)")
         self.conn.commit()
 
     def add(self, chunks: list[Chunk]) -> None:

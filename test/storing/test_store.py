@@ -48,6 +48,14 @@ def test_get_by_source(store):
     assert store.get_by_source("nope") == []
 
 
+def test_persistent_indexes_the_source_id():
+    """delete and get_by_source look chunks up by source: without the index, a scan each."""
+    conn = sqlite3.connect(":memory:")
+    PersistentStore(connection=conn)
+    plan = conn.execute("EXPLAIN QUERY PLAN SELECT data FROM chunks WHERE source_id = 'x'")
+    assert "chunks_source_id" in " ".join(str(row) for row in plan.fetchall())
+
+
 def test_persistent_survives_reopening_same_db(tmp_path):
     db = str(tmp_path / "store.db")
     PersistentStore(connection=sqlite3.connect(db)).add([_chunk("c0", "t0")])

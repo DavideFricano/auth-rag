@@ -38,9 +38,8 @@ class SemanticIndex(SimilarityIndex):
             return
         self.dim = dim
         if not self.db.collection_exists(self.collection):
-            self.db.create_collection(
-                collection_name=self.collection,
-                vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
+            self._create_collection(
+                vectors_config=VectorParams(size=dim, distance=Distance.COSINE)
             )
 
     def insert(self, chunks: list[Chunk]) -> None:

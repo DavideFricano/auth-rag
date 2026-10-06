@@ -38,8 +38,7 @@ class LexicalIndex(SimilarityIndex):
             return
         self._ready = True
         if not self.db.collection_exists(self.collection):
-            self.db.create_collection(
-                collection_name=self.collection,
+            self._create_collection(
                 vectors_config={},
                 sparse_vectors_config={"text": SparseVectorParams(modifier=Modifier.IDF)},
             )
