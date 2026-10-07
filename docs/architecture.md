@@ -585,6 +585,11 @@ riempirebbe di suo.
 ragione per cui `OllamaClient` e `OpenAIClient` si sostituiscono senza toccare nient'altro:
 **l'assemblaggio del prompt è dell'augmenter, non del client**.
 
+`OpenAIClient` e `OpenAIEmbedder` prendono un `base_url`, quindi parlano con qualunque server esponga
+l'API OpenAI: Ollama sotto `/v1`, vLLM, Azure OpenAI, o un gateway come il proxy di LiteLLM davanti a
+più provider. Retry, fallback fra modelli e costi sono cose del deployment, e stanno meglio lì che in
+una dipendenza della libreria.
+
 ---
 
 ## 8. Authorization (ABAC) — trasversale

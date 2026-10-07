@@ -42,11 +42,16 @@ class LocalEmbedder(BaseEmbedder):
 
 
 class OpenAIEmbedder(BaseEmbedder):
-    """Embedding model served by the OpenAI Embeddings API."""
+    """Embedding model behind any server speaking the OpenAI embeddings API.
 
-    def __init__(self, model_name: str) -> None:
+    ``base_url`` and ``api_key`` work as in ``OpenAIClient``.
+    """
+
+    def __init__(
+        self, model_name: str, base_url: str | None = None, api_key: str | None = None
+    ) -> None:
         self.model_name = model_name
-        self.client = OpenAI()
+        self.client = OpenAI(base_url=base_url, api_key=api_key)
 
     def embed_chunks(self, chunks: list[str]) -> NDArray[np.float32]:
         response = self.client.embeddings.create(input=chunks, model=self.model_name)

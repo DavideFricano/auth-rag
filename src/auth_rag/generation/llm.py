@@ -61,10 +61,17 @@ class OllamaClient(BaseLLMClient):
 
 
 class OpenAIClient(BaseLLMClient):
-    """LLM client for OpenAI chat models. Reads the API key from the environment."""
+    """LLM client for any server speaking the OpenAI chat API.
 
-    def __init__(self, model: str):
-        self.client = OpenAI()
+    That is OpenAI itself, and most of the rest by now: Ollama under ``/v1``, vLLM,
+    LM Studio, Azure OpenAI, or a gateway such as the LiteLLM proxy in front of many
+    providers. ``base_url`` picks the server; left unset, it and the key come from the
+    environment (``OPENAI_BASE_URL``, ``OPENAI_API_KEY``). A local server that checks no
+    key still needs one passed, since the client refuses to start without.
+    """
+
+    def __init__(self, model: str, base_url: str | None = None, api_key: str | None = None):
+        self.client = OpenAI(base_url=base_url, api_key=api_key)
         self.model = model
 
     def stream(self, messages: list[Message], temperature: float = 0.1) -> Iterator[str]:

@@ -1,4 +1,4 @@
-from auth_rag.generation.llm import OllamaClient
+from auth_rag.generation.llm import OllamaClient, OpenAIClient
 from auth_rag.types import Message
 
 
@@ -23,3 +23,17 @@ def test_ollama_payload_stream_flag():
     msgs = [Message(role="user", content="p")]
     assert client._payload(msgs, 0.1, 512, stream=True)["stream"] is True
     assert client._payload(msgs, 0.1, 512, stream=False)["stream"] is False
+
+
+def test_openai_client_targets_the_server_given():
+    client = OpenAIClient(model="qwen2.5:7b", base_url="http://localhost:11434/v1", api_key="ollama")
+    assert str(client.client.base_url) == "http://localhost:11434/v1/"
+    assert client.client.api_key == "ollama"
+
+
+def test_openai_client_falls_back_to_the_environment(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    client = OpenAIClient(model="gpt-4o-mini")
+    assert str(client.client.base_url) == "https://api.openai.com/v1/"
+    assert client.client.api_key == "sk-test"
