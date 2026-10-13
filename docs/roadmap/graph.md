@@ -264,3 +264,121 @@ chiudere i punti 1 e 5, cioè per sapere se il grafo vada tenuto.
 E una seconda, se e quando servirà: il tier `Persistent`, che oggi manca perché networkx non
 ha un on-disk e Neo4j non ha un embedded Python. Serializzare il grafo in GraphML sarebbe la
 strada, ma è lavoro da fare solo quando qualcuno lo chiede.
+
+## Revisione (13 ottobre 2026) — confronto coi framework e direzione
+
+*Appunti di progetto, niente di questo è ancora implementato.* La revisione parte da un dubbio
+sull'ingresso: oggi una query entra nel grafo solo attraverso un LLM che ne estrae le entità, poi
+confrontate parola per parola coi nomi dei nodi. Costa una chiamata per query, ignora flessioni e
+sinonimi, e una parola comune apre mezzo grafo. Da lì il discorso si è allargato a come gli altri
+sistemi risolvono gli stessi problemi, asse per asse.
+
+### Come fanno gli altri
+
+*Dalla documentazione nota a ottobre 2026, da riverificare: sono progetti che cambiano in fretta.*
+
+| | costruzione | ingresso in query | traversata | cosa arriva all'LLM |
+|---|---|---|---|---|
+| **Microsoft GraphRAG** | entità **con descrizioni**, relazioni, claim; community detection (Leiden) e riassunti per comunità | *local*: embedding della query contro gli embedding delle descrizioni delle entità. *Global*: map-reduce sui riassunti delle comunità | contesto della comunità, non una visita | descrizioni e riassunti **generati** |
+| **LightRAG** | entità e relazioni con descrizioni e parole chiave | l'LLM estrae parole chiave dalla query, confrontate per embedding con entità e relazioni | un salto | descrizioni generate |
+| **HippoRAG** | triple (OpenIE) più archi di sinonimia | l'LLM riconosce le entità della query, abbinate ai nodi per embedding | **Personalized PageRank** dai semi | passaggi originali |
+| **Neo4j GraphRAG** (`VectorCypherRetriever`) | chunk come nodi con indice vettoriale, entità collegate ai chunk | **ricerca vettoriale sui chunk**, poi Cypher dai chunk trovati | traversata Cypher | chunk |
+| **LlamaIndex** (`PropertyGraphIndex`) | nodi con embedding, per default | sotto-retriever combinabili: LLM e sinonimi, embedding dei nodi, text-to-Cypher | profondità configurabile | nodi e chunk |
+
+Due famiglie. Nella prima il grafo è **anche un index semantico**: le entità hanno un embedding e la
+query le cerca direttamente. Nella seconda si entra **dai chunk che il vector store ha già trovato**.
+Questo progetto sta nella seconda, ed è la tesi stessa: il vector store trova, il grafo espande.
+
+### Il punto che nessuno dei framework affronta: testo generato e ABAC
+
+Nessuno di questi sistemi ha un controllo d'accesso, e quelli della prima famiglia non potrebbero
+averlo così come sono. Un riassunto di comunità o una descrizione di entità **fonde contenuto di
+molti chunk con permessi diversi**: mostrarlo a un soggetto può dirgli ciò che sta in documenti che non
+può vedere, e non c'è modo di filtrarlo dopo, perché è testo nuovo. Non è il canale inferenziale
+accettato per la traversata, è un **leak di contenuto**.
+
+Le uscite sono due: riassunti calcolati per ogni insieme di permessi, con un costo che cresce con le
+combinazioni di attributi; oppure **non consegnare mai testo generato**. Questo progetto fa la seconda per
+costruzione, ed è anche una posizione di principio: un RAG fa retrieval, **non riscrive i chunk**.
+All'LLM arrivano solo chunk originali e autorizzati. La *global search* di Microsoft ("quali sono i temi
+del corpus?") resta quindi fuori dallo scopo, o possibile solo per partizione di accesso.
+
+### Direzione, asse per asse
+
+**Costruzione.** Estrattore iniettabile, triple grezze di default. L'arco che lega un concetto al chunk
+in cui è stato letto si rinomina da `READ_IN` a **`FROM_CHUNK`**, che dice esplicitamente che l'altro
+capo è un chunk (è anche il nome che usa il costruttore di grafi di Neo4j). In Neo4j il chunk resta un
+nodo, perché l'espansione deve rispondere a "quali concetti stanno in questi chunk" e una lista dentro il
+nodo-concetto non si indicizza; in networkx resta un attributo, più una mappa inversa chunk → concetti.
+Il chunk è un'**ancora di provenienza**, non parte della mappa concettuale: la traversata cammina solo
+fra concetti.
+
+**Rappresentazione dei nodi.** Nome sempre; oltre al nome, **due vettori, trattati allo stesso modo**,
+ciascuno calcolato solo se l'ingresso configurato lo usa:
+
+- **radici**, per il lessicale: il nome analizzato con le stesse regole del `LexicalIndex` — stopword
+  tolte, stemming Snowball — e salvato come testo, `"col immun correl"`. Si calcolano con lo Snowball e
+  le stopword di NLTK, già fra le dipendenze, perché fastembed restituisce le radici già trasformate in
+  hash; la verifica del 13 ottobre su tutte e cinque le `Language` ha dato stesse stopword (in inglese NLTK
+  ne ha 19 in più, tutte con l'apostrofo, che il tokenizzatore toglie prima del controllo) e stesso
+  stemming. Un test di contratto contro fastembed deve tenerlo vero;
+- **vettore denso**, per il semantico: l'embedding del nome, con un `BaseEmbedder` iniettato.
+
+Si calcolano in ingestion quando il concetto nasce — il ruolo che oggi ha la cache dei `tokens` — e
+**vivono sul nodo**: tutto resta nel grafo, ed è il punto. Una collection esterna dei concetti è stata
+scartata per questo, e perché chi vuole entrare nel grafo da fuori ha già l'espansione.
+
+**Chi calcola il BM25.** L'analisi è sempre nostra; indice inverso e punteggio no. In networkx il BM25 si
+calcola in memoria sulle radici. In Neo4j lo fa **Lucene**, con un full-text index sul campo delle radici e
+l'analizzatore `whitespace`, che divide sugli spazi e non rianalizza niente: le radici restano le nostre,
+quindi uguali nei due tier, e l'indice e il BM25 sono quelli del database. L'analizzatore italiano di Lucene
+sarebbe stato più semplice, ma ha regole sue (uno stemmer leggero, un'altra lista di stopword): il tier
+volatile, quello dei test e dello sviluppo, e il remoto, quello della produzione, avrebbero aperto seed
+diversi per la stessa query. Il denso usa l'indice vettoriale di Neo4j.
+
+**Ingresso.** Index e seeder sono cose diverse: un index ordina chunk, un seeder trasforma una query in
+concetti di partenza. Un seeder è la composizione di due scelte indipendenti:
+
+| | la query così com'è | entità estratte da un LLM |
+|---|---|---|
+| **confronto lessicale** — BM25 sulle radici, peso IDF fra i nomi dei concetti | `LexicalSeeder` | ciò che c'è oggi, migliorato |
+| **confronto semantico** — coseno fra vettori densi | query intera contro i nomi | entità contro nomi, corto con corto: il caso migliore |
+
+Il lessicale legge query, concetti e chunk allo stesso modo; l'IDF si ricava dal grafo stesso, contando in
+quanti concetti compare ogni radice. Risolve il problema della parola comune meglio di `max_seeds`, che
+resta come protezione.
+
+Il quarto ingresso non è un seeder: è **l'espansione**, `expand(found, filter)`, che entra dai chunk già
+trovati da qualunque index, attraverso `FROM_CHUNK`. È una similarità fra query e concetti, ma mediata
+dai chunk — e proprio per questo poggia su quella più affidabile, fra la query e testi interi. È l'ingresso
+semantico principale, e non richiede embedding sui nodi.
+
+**Traversata.** Iniettabile. Visita in ampiezza con decadimento per salto di default (con `hops=1` è il
+comportamento di LightRAG); **Personalized PageRank** e altre misure di centralità come alternative, sullo
+stesso `_expand` già isolato.
+
+**Integrazione col vector store.** L'espansione è uno **stadio esplicito dopo la fusione**, non un index
+in più: in parallelo, la lista del grafo deriverebbe da quella del semantico e RRF, che somma i contributi
+di ogni lista, conterebbe due volte lo stesso segnale. Lo stadio aggiunge solo chunk che non sono già nella
+lista fusa, e ciascuno **eredita lo score del chunk da cui è stato raggiunto**, scalato per la distanza
+(`score fuso * decay ** hop`): la lista resta ordinata sulla stessa scala anche senza reranker, e un
+reranker, se c'è, riordina tutto dopo. In `QueryPipeline` è una lista di postprocessor applicati in ordine
+dopo la fusione, che assorbe anche il reranker. Il grafo si costruisce comunque in ingestion; la facade lo
+aggiunge da sé agli index di ingestion quando lo trova fra i postprocessor, e rifiuta di averlo sia fra gli
+index della query sia come espansione. Il controllo ABAC sui chunk espansi è lo stesso di `retrieve`,
+estratto in una funzione sola: due chiamanti, un controllo.
+
+**Output.** Solo chunk originali e autorizzati.
+
+### Piano
+
+1. `READ_IN` → `FROM_CHUNK`.
+2. `expand(found, filter)` sul `RelationIndex`, con lo score ereditato.
+3. Lo stadio di espansione in `QueryPipeline` (postprocessor) e nella facade.
+4. Seeder iniettabile per l'ingresso dalla query: confronto lessicale e semantico, sulla query così com'è
+   o sulle entità estratte da un LLM. I nodi portano le radici, il vettore denso o entrambi, secondo il
+   seeder configurato, calcolati in ingestion; in Neo4j un full-text index `whitespace` sulle radici e un
+   indice vettoriale sul denso.
+5. Traversata iniettabile, con PageRank personalizzato accanto al decadimento.
+6. L'harness, che resta il debito: per confrontare senza grafo, grafo in parallelo, grafo come espansione,
+   e i seeder fra loro.
