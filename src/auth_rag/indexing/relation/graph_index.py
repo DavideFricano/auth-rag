@@ -35,6 +35,7 @@ class VolatileGraphIndex(RelationIndex):
     ) -> None:
         super().__init__(store, extractor, schema, hops, decay, over_fetch, max_seeds)
         self.graph = nx.MultiGraph()
+        self.by_chunk: dict[str, set[str]] = {}  # the reverse of each node's "chunks"
 
     def _add(self, relations: Sequence[Relation]) -> None:
         for relation in relations:
@@ -43,6 +44,7 @@ class VolatileGraphIndex(RelationIndex):
                     # cached: seeding scans every name, and that is the one hot loop here
                     self.graph.add_node(name, tokens=terms(name), chunks={})
                 self.graph.nodes[name]["chunks"][relation.chunk_id] = relation.source_id
+                self.by_chunk.setdefault(relation.chunk_id, set()).add(name)
             self.graph.add_edge(
                 relation.subject,
                 relation.object,
@@ -64,6 +66,7 @@ class VolatileGraphIndex(RelationIndex):
             chunks = self.graph.nodes[name]["chunks"]
             for chunk_id in [c for c, source in chunks.items() if source == source_id]:
                 del chunks[chunk_id]
+                self.by_chunk.pop(chunk_id, None)
             if not chunks:
                 self.graph.remove_node(name)
 
@@ -80,6 +83,11 @@ class VolatileGraphIndex(RelationIndex):
                 found.append((name, shared / len(tokens)))
         found.sort(key=lambda row: (-row[1], row[0]))
         return dict(found[: self.max_seeds])
+
+    def _concepts(self, chunk_ids: Sequence[str]) -> Iterable[tuple[str, str]]:
+        return [
+            (chunk_id, name) for chunk_id in chunk_ids for name in self.by_chunk.get(chunk_id, ())
+        ]
 
     def _expand(self, seeds: dict[str, float]) -> Iterable[tuple[str, int, float]]:
         """One breadth-first walk per seed, rather than one from all of them at once: a
@@ -116,7 +124,7 @@ class RemoteGraphIndex(RelationIndex):
     The chunk is a node rather than a list property on the concept::
 
         (:Concept {name, tokens})
-        (:Concept)-[:READ_IN]->(:Chunk {id, source_id})
+        (:Concept)-[:FROM_CHUNK]->(:Chunk {id, source_id})
         (:Concept)-[:RELATED {predicate, chunk_id, source_id}]->(:Concept)
 
     ``source_id`` on the relationship makes ``delete`` a statement instead of a scan, as
@@ -191,8 +199,8 @@ class RemoteGraphIndex(RelationIndex):
               ON CREATE SET o.tokens = row.object_tokens
             MERGE (c:Chunk {id: row.chunk_id})
               SET c.source_id = row.source_id
-            MERGE (s)-[:READ_IN]->(c)
-            MERGE (o)-[:READ_IN]->(c)
+            MERGE (s)-[:FROM_CHUNK]->(c)
+            MERGE (o)-[:FROM_CHUNK]->(c)
             MERGE (s)-[r:RELATED {predicate: row.predicate, chunk_id: row.chunk_id}]->(o)
               ON CREATE SET r.source_id = row.source_id
             """,
@@ -209,12 +217,12 @@ class RemoteGraphIndex(RelationIndex):
         self._run(
             """
             MATCH (c:Chunk {source_id: $source_id})
-            OPTIONAL MATCH (n:Concept)-[:READ_IN]->(c)
+            OPTIONAL MATCH (n:Concept)-[:FROM_CHUNK]->(c)
             WITH collect(DISTINCT n) AS touched, collect(DISTINCT c) AS chunks
             FOREACH (c IN chunks | DETACH DELETE c)
             WITH touched
             UNWIND touched AS n
-            WITH n WHERE NOT (n)-[:READ_IN]->(:Chunk)
+            WITH n WHERE NOT (n)-[:FROM_CHUNK]->(:Chunk)
             DETACH DELETE n
             """,
             source_id=source_id,
@@ -237,6 +245,17 @@ class RemoteGraphIndex(RelationIndex):
         )
         return {row["name"]: float(row["score"]) for row in rows}
 
+    def _concepts(self, chunk_ids: Sequence[str]) -> Iterable[tuple[str, str]]:
+        rows = self._run(
+            """
+            UNWIND $ids AS id
+            MATCH (n:Concept)-[:FROM_CHUNK]->(:Chunk {id: id})
+            RETURN id AS chunk_id, n.name AS name
+            """,
+            ids=list(chunk_ids),
+        )
+        return [(row["chunk_id"], row["name"]) for row in rows]
+
     def _expand(self, seeds: dict[str, float]) -> Iterable[tuple[str, int, float]]:
         """One statement for the whole expansion, hop distance computed in the database.
 
@@ -250,7 +269,7 @@ class RemoteGraphIndex(RelationIndex):
             MATCH (n:Concept {{name: seed.name}})
             MATCH path = (n)-[:RELATED*0..{int(self.hops)}]-(m:Concept)
             WITH seed.score AS score, m, min(length(path)) AS hop
-            MATCH (m)-[:READ_IN]->(c:Chunk)
+            MATCH (m)-[:FROM_CHUNK]->(c:Chunk)
             RETURN c.id AS chunk_id, hop, score
             """,
             seeds=[{"name": name, "score": score} for name, score in seeds.items()],

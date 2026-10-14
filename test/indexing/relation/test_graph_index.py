@@ -20,10 +20,11 @@ import pytest
 
 from auth_rag.authorization.filter import Allow, Match
 from auth_rag.authorization.schema import AccessSchema, Attribute, AttributeType
+from auth_rag.errors import EnforcementError
 from auth_rag.indexing.relation.extractor import BaseExtractor, Triple
 from auth_rag.indexing.relation.graph_index import RemoteGraphIndex, VolatileGraphIndex
 from auth_rag.storing.store import VolatileStore
-from auth_rag.types import Chunk, Metadata, Origin, Source
+from auth_rag.types import Chunk, Metadata, Origin, ScoredChunk, Source
 
 
 class _ScriptedExtractor(BaseExtractor):
@@ -243,6 +244,72 @@ def test_delete_removes_the_nodes_left_with_nothing(build):
     )
     index.delete("doc1")
     assert _concepts(index) == {"colite", "ctcae"}  # "steroidi" was doc1's alone
+
+
+# --- expansion: entering from the chunks the retrievers found ---------------------------
+
+
+def _found(index, *ids: str, score: float = 1.0) -> list[ScoredChunk]:
+    return [ScoredChunk(chunk=chunk, score=score) for chunk in index.store.get(list(ids))]
+
+
+def test_expand_reaches_through_the_concepts_of_the_found_chunks(build):
+    """``c1`` and ``c2`` never meet ``c0`` by similarity; they share its concepts."""
+    index = build(
+        [_chunk("c0"), _chunk("c1"), _chunk("c2"), _chunk("c3")],
+        {
+            "c0": [("colite", "p", "steroidi")],
+            "c1": [("colite", "p", "ctcae")],
+            "c2": [("ctcae", "p", "grado")],
+            "c3": [("glicemia", "p", "insulina")],
+        },
+    )
+    expanded = index.expand(_found(index, "c0"), top_i=10)
+    assert [sc.chunk.id for sc in expanded] == ["c1", "c2"]  # nearer first; c3 is unrelated
+
+
+def test_expand_hands_back_nothing_already_found(build):
+    index = build(
+        [_chunk("c0"), _chunk("c1")],
+        {"c0": [("colite", "p", "steroidi")], "c1": [("colite", "p", "ctcae")]},
+    )
+    assert index.expand(_found(index, "c0", "c1"), top_i=10) == []
+
+
+def test_an_expanded_chunk_ranks_below_the_one_that_reached_it(build):
+    """The score is inherited, so the list stays on the scale of the fusion it extends."""
+    index = build(
+        [_chunk("c0"), _chunk("c1")],
+        {"c0": [("colite", "p", "steroidi")], "c1": [("colite", "p", "ctcae")]},
+        decay=0.5,
+    )
+    (expanded,) = index.expand(_found(index, "c0", score=0.04), top_i=10)
+    assert expanded.score == pytest.approx(0.02)
+
+
+def test_expand_applies_the_filter_like_retrieve(build):
+    index = build(
+        [
+            _chunk("c0", "doc1", {"tenant": "acme"}),
+            _chunk("c1", "doc2", {"tenant": "globex"}),
+            _chunk("c2", "doc3", {"tenant": "acme"}),
+        ],
+        {
+            "c0": [("colite", "p", "steroidi")],
+            "c1": [("colite", "p", "ctcae")],
+            "c2": [("steroidi", "p", "budesonide")],
+        },
+        schema=_SCHEMA,
+    )
+    acme = Match(attribute="tenant", values={"acme"})
+    assert [sc.chunk.id for sc in index.expand(_found(index, "c0"), 10, acme)] == ["c2"]
+    with pytest.raises(EnforcementError):
+        index.expand(_found(index, "c0"), top_i=10)
+
+
+def test_expand_from_nothing_finds_nothing(build):
+    index = build([_chunk("c0")], {"c0": [("colite", "p", "steroidi")]})
+    assert index.expand([], top_i=10) == []
 
 
 # --- access control: the graph does not filter, ``retrieve`` does ----------------------

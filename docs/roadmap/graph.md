@@ -361,7 +361,9 @@ stesso `_expand` già isolato.
 in più: in parallelo, la lista del grafo deriverebbe da quella del semantico e RRF, che somma i contributi
 di ogni lista, conterebbe due volte lo stesso segnale. Lo stadio aggiunge solo chunk che non sono già nella
 lista fusa, e ciascuno **eredita lo score del chunk da cui è stato raggiunto**, scalato per la distanza
-(`score fuso * decay ** hop`): la lista resta ordinata sulla stessa scala anche senza reranker, e un
+(`score fuso * decay ** (hop + 1)`: il passaggio da un chunk all'altro attraverso un concetto è già un
+passo, quindi un chunk espanso sta sempre sotto quello da cui viene, anche a zero salti): la lista resta
+ordinata sulla stessa scala anche senza reranker, e un
 reranker, se c'è, riordina tutto dopo. In `QueryPipeline` è una lista di postprocessor applicati in ordine
 dopo la fusione, che assorbe anche il reranker. Il grafo si costruisce comunque in ingestion; la facade lo
 aggiunge da sé agli index di ingestion quando lo trova fra i postprocessor, e rifiuta di averlo sia fra gli

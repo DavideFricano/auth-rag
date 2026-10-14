@@ -53,6 +53,9 @@ class _FakeGraphIndex(RelationIndex):
         self.seen_terms = query_terms
         return self.seeds if query_terms else {}  # no terms, no way in — as a real tier
 
+    def _concepts(self, chunk_ids: Sequence[str]) -> Iterable[tuple[str, str]]:
+        raise NotImplementedError  # the tiers' own, tested on both of them
+
     def _expand(self, seeds: dict[str, float]) -> Iterable[tuple[str, int, float]]:
         return self.rows
 

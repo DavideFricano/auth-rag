@@ -66,6 +66,12 @@ class BaseIndex(ABC):
         ``top_i`` counts authorized results: the list is cut to it only after the check,
         so an unauthorized candidate does not silently cost a slot.
         """
+        self._check(filter)
+        found = self._search(query, top_i)
+        return self._authorized(found, filter)[:top_i]
+
+    def _check(self, filter: Filter | None) -> None:
+        """Schema and filter agree, and the filter names only what the schema declares."""
         if self.schema is None:
             if filter is not None:
                 raise EnforcementError(
@@ -80,7 +86,15 @@ class BaseIndex(ABC):
             )
         else:
             self.schema.validate_filter(filter)
-        scored = self._search(query, top_i)
+
+    def _authorized(
+        self, scored: list[tuple[str, float]], filter: Filter | None
+    ) -> list[ScoredChunk]:
+        """Resolve ``(chunk_id, score)`` through the store and keep what the filter allows.
+
+        Every way out of an index goes through here, so there is one enforcement however
+        many entry points there are.
+        """
         by_id = {chunk.id: chunk for chunk in self.store.get([id_ for id_, _ in scored])}
         results = [
             ScoredChunk(chunk=by_id[id_], score=score) for id_, score in scored if id_ in by_id
@@ -91,11 +105,10 @@ class BaseIndex(ABC):
                     "these chunks carry access attributes but this index enforces nothing: "
                     "give it the AccessSchema they were labelled against"
                 )
-            return results[:top_i]
-        authorized = [
+            return results
+        return [
             sc
             for sc in results
             if self.schema.is_labeled(sc.chunk.metadata.source.access)
             and evaluate(filter, sc.chunk.metadata.source.access)
         ]
-        return authorized[:top_i]

@@ -6,11 +6,12 @@ from collections.abc import Iterable, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from auth_rag.authorization.filter import Filter
 from auth_rag.authorization.schema import AccessSchema
 from auth_rag.indexing.index import BaseIndex
 from auth_rag.indexing.relation.extractor import BaseExtractor
 from auth_rag.storing.store import BaseStore
-from auth_rag.types import Chunk
+from auth_rag.types import Chunk, ScoredChunk
 
 _WORD = re.compile(r"[^\W\d_]+", re.UNICODE)
 
@@ -141,6 +142,10 @@ class RelationIndex(BaseIndex, ABC):
         """
 
     @abstractmethod
+    def _concepts(self, chunk_ids: Sequence[str]) -> Iterable[tuple[str, str]]:
+        """``(chunk_id, concept name)`` for each concept these chunks were read in."""
+
+    @abstractmethod
     def _expand(self, seeds: dict[str, float]) -> Iterable[tuple[str, int, float]]:
         """``(chunk_id, hop, seed score)`` for each chunk within ``hops`` of a seed.
         Duplicates are expected — picking the best is ``_search``'s job."""
@@ -179,3 +184,29 @@ class RelationIndex(BaseIndex, ABC):
         # ties broken by id, so the same graph always answers the same way
         ranked = sorted(best.items(), key=lambda row: (-row[1], row[0]))
         return ranked[: top_i * self.over_fetch]
+
+    def expand(
+        self, found: list[ScoredChunk], top_i: int, filter: Filter | None = None
+    ) -> list[ScoredChunk]:
+        """The chunks the found ones lead to, for an expansion stage after fusion.
+
+        Enters through the concepts the found chunks were read in rather than through the
+        query, so it follows the retrievers instead of competing with them. A chunk reached
+        inherits the score of the one it was reached from, ``score * decay ** (hop + 1)``:
+        at least one step below it, on the scale of the list it extends. What was already
+        found is not handed back.
+        """
+        self._check(filter)
+        scores = {sc.chunk.id: sc.score for sc in found}
+        seeds: dict[str, float] = {}
+        for chunk_id, name in self._concepts(list(scores)):
+            seeds[name] = max(seeds.get(name, 0.0), scores[chunk_id])
+        best: dict[str, float] = {}
+        for chunk_id, hop, seed_score in self._expand(seeds):
+            if chunk_id in scores:
+                continue
+            score = seed_score * self.decay ** (hop + 1)
+            if score > best.get(chunk_id, 0.0):
+                best[chunk_id] = score
+        ranked = sorted(best.items(), key=lambda row: (-row[1], row[0]))
+        return self._authorized(ranked[: top_i * self.over_fetch], filter)[:top_i]
