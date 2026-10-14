@@ -70,11 +70,12 @@ La pipeline di query, che in realtà corrisponde alla Retrieval Augmented Genera
     - `ScoreFusionRanker`: fonde i punteggi ottenuti per chunk:
         - `RelativeScoreFusionRanker`: normalizza sul minimo e massimo di ogni lista.
         - `DistributionScoreFusionRanker`: normalizza su media e deviazione standard di ogni lista.
-3. `Reranker`: riordina i candidati sopravvissuti, confrontandoli con la query:
+3. `Expander` (opzionale): un grafo che entra dai chunk già fusi invece che dalla query, e aggiunge quelli a cui portano i loro concetti. Ognuno eredita il punteggio del chunk da cui è stato raggiunto, scalato per la distanza, ed è filtrato come ogni risultato di un index; sta dopo la fusione perché la sua lista deriverebbe da quella degli index, e la fusione conterebbe due volte lo stesso segnale.
+4. `Reranker`: riordina i candidati sopravvissuti, confrontandoli con la query:
     - `CrossReranker`: cross-encoder che valuta congiuntamente la coppia (query, chunk).
-4. `Augmenter`: assembla il prompt da istruzioni, domanda e contesto (**Augmenter**):
+5. `Augmenter`: assembla il prompt da istruzioni, domanda e contesto (**Augmenter**):
     - `PromptAugmenter`: un messaggio di sistema e uno utente, con le fonti numerate e attribuite.
-5. `LLMClient`: invia il prompt al modello e ne restituisce la risposta (**Generation**), completa oppure in streaming. I client implementati sono:
+6. `LLMClient`: invia il prompt al modello e ne restituisce la risposta (**Generation**), completa oppure in streaming. I client implementati sono:
     - `OllamaClient`: modelli serviti localmente da Ollama;
     - `OpenAIClient`: modelli serviti dall'API OpenAI.
 

@@ -30,7 +30,7 @@ from auth_rag.indexing.similarity.semantic_index import VolatileSemanticIndex
 from auth_rag.ingestion.chunker import BaseChunker
 from auth_rag.ingestion.labeler import PropagatingLabeler, StaticLabeler
 from auth_rag.ingestion.loader import BaseLoader
-from auth_rag.pipeline import RagPipeline
+from auth_rag.pipeline import QueryPipeline, RagPipeline
 from auth_rag.ranking.fusion_ranker import ReciprocalRankFusionRanker
 from auth_rag.storing.store import VolatileStore
 from auth_rag.types import Chunk, Document, Language, Message, Metadata, Origin, Source
@@ -255,6 +255,76 @@ def test_remove_refuses_a_single_string():
 
     with pytest.raises(TypeError):
         rag.ingest_pipeline.remove("doc1")
+
+
+# --- expansion: the graph entered from the fused chunks ----------------------------------
+
+
+class _LinkingExtractor(BaseExtractor):
+    """c0 and c3 name the same patient, and nothing else links the two documents."""
+
+    def extract(self, chunk: Chunk) -> list[Triple]:
+        script = {"c0": ("febbre", "paziente"), "c3": ("glicemia", "paziente")}
+        if chunk.id not in script:
+            return []
+        subject, object_ = script[chunk.id]
+        return [Triple(subject=subject, predicate="riguarda", object=object_)]
+
+    def entities(self, text: str) -> list[str]:
+        return []
+
+
+def _expanding(expand: bool) -> RagPipeline:
+    store = VolatileStore()
+    return RagPipeline(
+        loader=_FakeLoader(_DOCS),
+        chunker=_FakeChunker(_CHUNKS),
+        store=store,
+        indexes=[
+            VolatileSemanticIndex(store, _FakeEmbedder(_TABLE, dim=2)),
+            VolatileLexicalIndex(store, language=Language.ITALIAN),
+        ],
+        expander=VolatileGraphIndex(store, _LinkingExtractor()) if expand else None,
+        ranker=ReciprocalRankFusionRanker(),
+        augmenter=PromptAugmenter(),
+        llm=_CapturingLLM(),
+        top_i=1,
+        top_k=10,
+        top_n=10,
+    )
+
+
+def test_the_expander_adds_what_no_index_found():
+    """c3 says nothing about fever; it is reached because c0, which does, names the same
+    patient."""
+    plain, expanded = _expanding(expand=False), _expanding(expand=True)
+    plain.ingest_pipeline.ingest()
+    expanded.ingest_pipeline.ingest()
+
+    assert "c3" not in _ids(plain.query_pipeline.retrieve("febbre"))
+    context = expanded.query_pipeline.retrieve("febbre")
+    assert "c3" in _ids(context)
+    scores = {sc.chunk.id: sc.score for sc in context}
+    assert scores["c3"] < scores["c0"]  # below the chunk that reached it
+
+
+def test_the_facade_builds_the_expander_but_does_not_query_it_as_an_index():
+    rag = _expanding(expand=True)
+    graph = rag.query_pipeline.expander
+
+    assert graph in rag.ingest_pipeline.indexes
+    assert graph not in rag.query_pipeline.indexes
+
+
+def test_the_expander_cannot_also_be_an_index():
+    store = VolatileStore()
+    graph = VolatileGraphIndex(store, _LinkingExtractor())
+
+    with pytest.raises(ValueError, match="answer twice"):
+        QueryPipeline(
+            [graph], ReciprocalRankFusionRanker(), PromptAugmenter(), _CapturingLLM(),
+            top_i=1, top_k=1, top_n=1, expander=graph,
+        )
 
 
 # --- ABAC end to end: what the labeler writes at ingestion is what the filter reads -------

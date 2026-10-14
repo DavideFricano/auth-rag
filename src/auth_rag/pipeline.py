@@ -7,6 +7,7 @@ from auth_rag.augmentation.augmenter import BaseAugmenter
 from auth_rag.authorization.filter import Filter
 from auth_rag.generation.llm import BaseLLMClient
 from auth_rag.indexing.index import BaseIndex
+from auth_rag.indexing.relation.index import RelationIndex
 from auth_rag.ingestion.chunker import BaseChunker
 from auth_rag.ingestion.labeler import BaseLabeler
 from auth_rag.ingestion.loader import BaseLoader
@@ -113,10 +114,15 @@ class IngestionPipeline:
 
 
 class QueryPipeline:
-    """Online pipeline: retrieves from the indexes, fuses, optionally reranks, and generates.
+    """Online pipeline: retrieves from the indexes, fuses, optionally expands and reranks,
+    and generates.
 
     Each index resolves its own hits to chunks through the shared store, so retrieval is
     a list of ``ScoredChunk`` lists that the fusion ranker merges (RRF/RSF).
+
+    The expander, when there is one, is a graph entered from the fused chunks rather than
+    from the query. It comes after the fusion and not among the indexes: its list would
+    derive from theirs, and RRF would count the same signal twice.
 
     The authorization filter travels through it without being interpreted: the caller (a
     PEP, holding the identity this library never sees) decides it, the indexes apply it.
@@ -132,11 +138,15 @@ class QueryPipeline:
         top_k: int,
         top_n: int,
         reranker: Reranker | None = None,
+        expander: RelationIndex | None = None,
     ) -> None:
+        if expander is not None and any(index is expander for index in indexes):
+            raise ValueError("the expander is also among the indexes: it would answer twice")
         self.indexes = indexes
         self.ranker = ranker
         self.augmenter = augmenter
         self.reranker = reranker
+        self.expander = expander
         self.llm = llm
         self.top_i = top_i  # candidates pulled from each index
         self.top_k = top_k  # results kept after fusion (fed to the reranker)
@@ -150,6 +160,9 @@ class QueryPipeline:
         """
         retrieved = [index.retrieve(query, self.top_i, filter) for index in self.indexes]
         fused = self.ranker.rank(retrieved, self.top_k)
+        if self.expander is not None:
+            expanded = self.expander.expand(fused, self.top_i, filter)
+            fused = sorted(fused + expanded, key=lambda sc: sc.score, reverse=True)
         if self.reranker is not None:
             context = self.reranker.rank([sc.chunk for sc in fused], query, self.top_n)
         else:
@@ -171,7 +184,8 @@ class RagPipeline:
     """Collects the ingestion and query pipelines behind one object (facade).
 
     Store and indexes are shared between the two: what the ingestion writes is exactly
-    what the query reads.
+    what the query reads. The expander is built at ingestion like any index, so it is
+    added to the ingestion's indexes here and passed once by the caller.
     """
 
     def __init__(
@@ -188,8 +202,10 @@ class RagPipeline:
         loader: BaseLoader | None = None,
         reranker: Reranker | None = None,
         labeler: BaseLabeler | None = None,
+        expander: RelationIndex | None = None,
     ) -> None:
-        self.ingest_pipeline = IngestionPipeline(chunker, store, indexes, loader, labeler)
+        built = indexes + ([expander] if expander is not None else [])
+        self.ingest_pipeline = IngestionPipeline(chunker, store, built, loader, labeler)
         self.query_pipeline = QueryPipeline(
-            indexes, ranker, augmenter, llm, top_i, top_k, top_n, reranker
+            indexes, ranker, augmenter, llm, top_i, top_k, top_n, reranker, expander
         )

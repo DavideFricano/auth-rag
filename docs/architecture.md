@@ -502,7 +502,8 @@ flowchart LR
     VR -- list[ScoredChunk] --> F["FusionRanker<br>(RRF/RSF/DBSF)"]
     BM -- list[ScoredChunk] --> F
     GR -- list[ScoredChunk] --> F
-    F -- list[ScoredChunk]<br> --> RR["Reranker<br>(CrossEncoder)"]
+    F -- list[ScoredChunk]<br> --> EX["Expander<br>(grafo, opzionale)"]
+    EX -- list[ScoredChunk]<br> --> RR["Reranker<br>(CrossEncoder)"]
     RR -- list[ScoredChunk]<br> --> AUG
     AUG -- list[Message] --> LLM["LLMClient<br>(Ollama/OpenAI)"]
     LLM -- str --> ANS[/"answer"/]
@@ -515,6 +516,7 @@ flowchart LR
      AUG:::step
      F:::rank
      RR:::rank
+     EX:::step
      LLM:::step
      ANS:::io
      n1:::io
@@ -524,13 +526,22 @@ flowchart LR
     classDef db fill:#f3e5f5,stroke:#7b1fa2,color:#4a148c
 ```
 
+Il grafo può stare in due posti. Fra gli index, entra dalla query e la sua lista va alla fusione come le
+altre. Come `expander`, entra dai chunk **già fusi**: segue i concetti in cui sono stati letti
+(`FROM_CHUNK`) e aggiunge i chunk a cui portano, mai quelli già trovati. Ognuno eredita il punteggio del
+chunk da cui è stato raggiunto, `score * decay ** (hop + 1)`, quindi la lista resta ordinata sulla
+scala della fusione, ed è filtrato dallo stesso controllo di `retrieve`. Sta dopo la fusione e non fra
+gli index perché la sua lista deriverebbe dalla loro, e RRF, che somma i contributi di ogni lista,
+conterebbe due volte lo stesso segnale. In ingestion si costruisce come ogni index: la facade lo
+aggiunge da sé, e la pipeline rifiuta di averlo in entrambi i posti.
+
 ### 7.1 L'imbuto: `top_i` → `top_k` → `top_n`
 
 Tre soglie, tre stadi, costi crescenti per documento:
 
 | soglia | dove | default | significato |
 |---|---|---|---|
-| `top_i` | per **ogni** index | 20 | quanti candidati **autorizzati** tira su ciascun retriever |
+| `top_i` | per **ogni** index | 20 | quanti candidati **autorizzati** tira su ciascun retriever, e quanti ne aggiunge l'expander |
 | `top_k` | dopo la fusione | 10 | quanti sopravvivono al merge, e vanno al reranker |
 | `top_n` | dopo il reranking | 5 | il contesto finale che vede l'LLM |
 

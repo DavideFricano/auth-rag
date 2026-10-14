@@ -364,10 +364,11 @@ lista fusa, e ciascuno **eredita lo score del chunk da cui è stato raggiunto**,
 (`score fuso * decay ** (hop + 1)`: il passaggio da un chunk all'altro attraverso un concetto è già un
 passo, quindi un chunk espanso sta sempre sotto quello da cui viene, anche a zero salti): la lista resta
 ordinata sulla stessa scala anche senza reranker, e un
-reranker, se c'è, riordina tutto dopo. In `QueryPipeline` è una lista di postprocessor applicati in ordine
-dopo la fusione, che assorbe anche il reranker. Il grafo si costruisce comunque in ingestion; la facade lo
-aggiunge da sé agli index di ingestion quando lo trova fra i postprocessor, e rifiuta di averlo sia fra gli
-index della query sia come espansione. Il controllo ABAC sui chunk espansi è lo stesso di `retrieve`,
+reranker, se c'è, riordina tutto dopo. In `QueryPipeline` è un campo a sé, `expander`, accanto al
+reranker e non fuso con lui: una lista generica di postprocessor è stata scartata come generalità che
+nessuno chiedeva. Il grafo si costruisce comunque in ingestion; la facade lo aggiunge da sé agli index di
+ingestion quando lo riceve come `expander`, e la pipeline rifiuta di averlo sia fra gli index della query
+sia come espansione. Il controllo ABAC sui chunk espansi è lo stesso di `retrieve`,
 estratto in una funzione sola: due chiamanti, un controllo.
 
 **Output.** Solo chunk originali e autorizzati.
@@ -376,7 +377,7 @@ estratto in una funzione sola: due chiamanti, un controllo.
 
 1. `READ_IN` → `FROM_CHUNK`.
 2. `expand(found, filter)` sul `RelationIndex`, con lo score ereditato.
-3. Lo stadio di espansione in `QueryPipeline` (postprocessor) e nella facade.
+3. Lo stadio di espansione in `QueryPipeline`, come campo `expander`, e nella facade.
 4. Seeder iniettabile per l'ingresso dalla query: confronto lessicale e semantico, sulla query così com'è
    o sulle entità estratte da un LLM. I nodi portano le radici, il vettore denso o entrambi, secondo il
    seeder configurato, calcolati in ingestion; in Neo4j un full-text index `whitespace` sulle radici e un
