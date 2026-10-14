@@ -8,7 +8,7 @@ from neo4j import Driver, GraphDatabase
 from auth_rag.authorization.schema import AccessSchema
 from auth_rag.indexing.relation.extractor import BaseExtractor
 from auth_rag.indexing.relation.index import Relation, RelationIndex
-from auth_rag.indexing.relation.seeder import BaseSeeder
+from auth_rag.indexing.relation.seeder import BaseSeeder, bm25
 from auth_rag.storing.store import BaseStore
 
 
@@ -43,7 +43,6 @@ class VolatileGraphIndex(RelationIndex):
         for relation in relations:
             for name in (relation.subject, relation.object):
                 if name not in self.graph:
-                    # cached: seeding scans every name, and that is the one hot loop here
                     self.graph.add_node(name, chunks={}, **self.seeder.represent(name))
                 self.graph.nodes[name]["chunks"][relation.chunk_id] = relation.source_id
                 self.by_chunk.setdefault(relation.chunk_id, set()).add(name)
@@ -72,19 +71,14 @@ class VolatileGraphIndex(RelationIndex):
             if not chunks:
                 self.graph.remove_node(name)
 
-    def _seeds(self, query_terms: set[str]) -> dict[str, float]:
-        if not query_terms:
-            return {}
-        found = []
-        for name, data in self.graph.nodes(data=True):
-            tokens = set(data["tokens"])
-            shared = len(tokens & query_terms)
-            if shared:
-                # share of the *name* matched: a concept the query names outright beats a
-                # long one it only clipped
-                found.append((name, shared / len(tokens)))
-        found.sort(key=lambda row: (-row[1], row[0]))
-        return dict(found[: self.max_seeds])
+    def _match(self, roots: list[str]) -> dict[str, float]:
+        documents = {
+            name: data["roots"].split()
+            for name, data in self.graph.nodes(data=True)
+            if "roots" in data
+        }
+        ranked = sorted(bm25(documents, roots).items(), key=lambda row: (-row[1], row[0]))
+        return dict(ranked[: self.max_seeds])
 
     def _concepts(self, chunk_ids: Sequence[str]) -> Iterable[tuple[str, str]]:
         return [
@@ -125,7 +119,7 @@ class RemoteGraphIndex(RelationIndex):
 
     The chunk is a node rather than a list property on the concept::
 
-        (:Concept {name, tokens})
+        (:Concept {name, roots})
         (:Concept)-[:FROM_CHUNK]->(:Chunk {id, source_id})
         (:Concept)-[:RELATED {predicate, chunk_id, source_id}]->(:Concept)
 
@@ -176,6 +170,11 @@ class RemoteGraphIndex(RelationIndex):
             "CREATE INDEX related_source_id IF NOT EXISTS "
             "FOR ()-[r:RELATED]-() ON (r.source_id)"
         )
+        self._run(
+            "CREATE FULLTEXT INDEX concept_roots IF NOT EXISTS FOR (n:Concept) ON EACH [n.roots] "
+            "OPTIONS {indexConfig: {`fulltext.analyzer`: 'whitespace'}}"
+        )
+        self._run("CALL db.awaitIndexes()")
 
     def _add(self, relations: Sequence[Relation]) -> None:
         if not relations:
@@ -231,19 +230,20 @@ class RemoteGraphIndex(RelationIndex):
             source_id=source_id,
         )
 
-    def _seeds(self, query_terms: set[str]) -> dict[str, float]:
-        if not query_terms:
+    def _match(self, roots: list[str]) -> dict[str, float]:
+        """Lucene does the BM25 and keeps the index; the roots are ours, already analysed,
+        which the whitespace analyzer leaves as they are — so both tiers read text alike."""
+        if not roots:
             return {}
+        self._ensure_constraints()
         rows = self._run(
             """
-            UNWIND $terms AS term
-            MATCH (n:Concept) WHERE term IN n.tokens
-            WITH n, count(DISTINCT term) AS shared
-            RETURN n.name AS name, toFloat(shared) / size(n.tokens) AS score
+            CALL db.index.fulltext.queryNodes('concept_roots', $roots) YIELD node, score
+            RETURN node.name AS name, score
             ORDER BY score DESC, name ASC
             LIMIT $limit
             """,
-            terms=sorted(query_terms),
+            roots=" ".join(roots),
             limit=self.max_seeds,
         )
         return {row["name"]: float(row["score"]) for row in rows}

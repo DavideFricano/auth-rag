@@ -100,7 +100,8 @@ src/auth_rag/
 │   │   ├── semantic_index.py  # denso, cosine
 │   │   └── lexical_index.py   # sparso, BM25 con IDF server-side
 │   └── relation/         # la famiglia "rilevanza per relazioni" — il grafo
-│       ├── index.py      #   RelationIndex: semi + funzione di score, condivisi
+│       ├── index.py      #   RelationIndex: espansione + funzione di score, condivise
+│       ├── seeder.py     #   da dove entra una query: radici e BM25 sui nomi dei concetti
 │       ├── extractor.py  #   chunk -> Triple (LLM a temperatura 0)
 │       └── graph_index.py  # networkx (volatile) e Neo4j (remoto)
 │
@@ -445,7 +446,7 @@ Cypher sono motori diversi davvero.
 
 | | scelta | conseguenza |
 |---|---|---|
-| **semi** | ricerca propria sui nomi dei nodi | se li chiedesse al `SemanticIndex`, le liste che arrivano al `FusionRanker` non sarebbero più indipendenti e la corroborazione che RRF premia diventerebbe in parte auto-correlazione |
+| **semi** | un seeder iniettato, che cerca sui nomi dei nodi: di default BM25 sulle radici della query, con le stesse regole del `LexicalIndex` | se li chiedesse al `SemanticIndex`, le liste che arrivano al `FusionRanker` non sarebbero più indipendenti e la corroborazione che RRF premia diventerebbe in parte auto-correlazione. Entrare dai chunk già trovati è l'expander, che sta dopo la fusione proprio per questo |
 | **score** | `seed * decay ** hop` | monotono, un parametro — e **vincola il ranker a RRF**: il numero non è commensurabile con coseno e BM25 |
 | **determinismo** | temperatura 0, prompt e modello impacchettati in `LLMExtractor.version`, grafo ricostruito per sorgente (`delete` poi `insert`) | la re-ingestione resta neutra anche se l'estrattore è un LLM |
 | **ABAC** | traversata libera, filtro solo sui chunk finali | un solo punto di enforcement, quello di sempre. Il prezzo è accettato e scritto sotto |
@@ -770,7 +771,8 @@ Tabella di lettura rapida: dove si aggancia una cosa nuova, e cosa **non** va to
 | un nuovo estrattore di relazioni | `BaseExtractor` | il `RelationIndex` lo riceve iniettato, come l'embedder |
 | un nuovo backend di storage | `BaseStore` | gli index conoscono solo la ABC |
 | **una nuova famiglia di retrieval** | `BaseIndex` | `BaseIndex` non importa nessun backend; la `QueryPipeline` non cambia |
-| un nuovo motore di grafo | `RelationIndex` (`_add`, `_seeds`, `_expand`, `delete`) | semi e funzione di score stanno nella ABC, quindi due tier non possono divergere |
+| un nuovo motore di grafo | `RelationIndex` (`_add`, `_match`, `_concepts`, `_expand`, `delete`) | espansione e funzione di score stanno nella ABC, quindi due tier non possono divergere |
+| un nuovo modo di entrare nel grafo | `BaseSeeder` | decide cosa portano i nodi e come una query li trova; il grafo non cambia |
 | una nuova strategia di fusione | `FusionRanker` | riceve `list[list[ScoredChunk]]` |
 | un nuovo LLM | `BaseLLMClient` | consuma `list[Message]`, neutro |
 

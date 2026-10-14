@@ -23,9 +23,9 @@ from auth_rag.authorization.schema import AccessSchema, Attribute, AttributeType
 from auth_rag.errors import EnforcementError
 from auth_rag.indexing.relation.extractor import BaseExtractor, Triple
 from auth_rag.indexing.relation.graph_index import RemoteGraphIndex, VolatileGraphIndex
-from auth_rag.indexing.relation.seeder import BaseSeeder, LexicalSeeder
+from auth_rag.indexing.relation.seeder import BaseSeeder, LexicalSeeder, roots
 from auth_rag.storing.store import VolatileStore
-from auth_rag.types import Chunk, Metadata, Origin, ScoredChunk, Source
+from auth_rag.types import Chunk, Language, Metadata, Origin, ScoredChunk, Source
 
 
 class _ScriptedExtractor(BaseExtractor):
@@ -169,23 +169,32 @@ def test_case_and_spacing_do_not_decide_whether_a_bridge_exists(build):
     assert set(dict(index._search("steroidi", top_i=10))) == {"c0", "c1"}
 
 
-def test_seeds_prefer_the_concept_the_query_names_outright(build):
+def test_matching_prefers_the_concept_the_query_names_outright(build):
     """A one-word concept the query hits entirely beats a long one it only clipped."""
     index = build(
         [_chunk("c0")],
         {"c0": [("colite", "p", "colite immunocorrelata di grado tre")]},
+        seeder=LexicalSeeder(language=Language.ITALIAN),
     )
-    assert index._seeds({"colite"}) == {
-        "colite": 1.0,
-        # four terms, not five: "di" is below the length cut-off and never counted
-        "colite immunocorrelata di grado tre": pytest.approx(0.25),
-    }
+    matched = index._match(roots("colite", Language.ITALIAN))
+    assert list(matched) == ["colite", "colite immunocorrelata di grado tre"]
+
+
+def test_a_root_every_concept_shares_weighs_less_than_a_rare_one(build):
+    index = build(
+        [_chunk("c0")],
+        {"c0": [("colite acuta", "p", "colite cronica"), ("colite", "p", "budesonide")]},
+        seeder=LexicalSeeder(language=Language.ITALIAN),
+    )
+    matched = index._match(roots("colite cronica", Language.ITALIAN))
+    assert next(iter(matched)) == "colite cronica"
+    assert matched["colite cronica"] > matched["colite acuta"]
 
 
 def test_max_seeds_caps_how_many_entry_points_a_query_opens(build):
     script = {"c0": [(f"colite {i}", "p", f"altro {i}") for i in range(10)]}
     index = build([_chunk("c0")], script, max_seeds=3)
-    assert len(index._seeds({"colite"})) == 3
+    assert len(index._match(roots("colite", Language.ENGLISH))) == 3
 
 
 # --- idempotence, which the content-hashed chunk ids depend on -------------------------
@@ -226,10 +235,7 @@ def test_delete_then_insert_rebuilds_the_source_cleanly(build):
     chunks = [_chunk("c0", "doc1")]
     index = build(chunks, {"c0": [("colite", "p", "steroidi")]})
     index.delete("doc1")
-    # both sides: the index extracts at ingestion, its seeder reads the query
-    index.extractor = index.seeder.extractor = _ScriptedExtractor(
-        {"c0": [("colite", "p", "budesonide")]}
-    )
+    index.extractor = _ScriptedExtractor({"c0": [("colite", "p", "budesonide")]})
     index.insert(chunks)
     assert index._search("steroidi", top_i=10) == []
     assert set(dict(index._search("budesonide", top_i=10))) == {"c0"}
@@ -279,13 +285,13 @@ def test_the_seeder_decides_what_a_node_carries_and_where_a_query_enters(build):
     assert set(dict(index._search("anything at all", top_i=10))) == {"c0"}
 
 
-def test_a_lexical_seeder_without_extractor_reads_the_query_itself(build):
+def test_the_query_is_read_as_it_is_with_its_inflections(build):
     index = build(
         [_chunk("c0"), _chunk("c1")],
         {"c0": [("colite", "p", "steroidi")], "c1": [("glicemia", "p", "insulina")]},
-        seeder=LexicalSeeder(),
+        seeder=LexicalSeeder(language=Language.ITALIAN),
     )
-    assert set(dict(index._search("come si cura la colite?", top_i=10))) == {"c0"}
+    assert set(dict(index._search("come si curano le coliti?", top_i=10))) == {"c0"}
 
 
 # --- expansion: entering from the chunks the retrievers found ---------------------------

@@ -9,7 +9,7 @@ from auth_rag.authorization.filter import Filter
 from auth_rag.authorization.schema import AccessSchema
 from auth_rag.indexing.index import BaseIndex
 from auth_rag.indexing.relation.extractor import BaseExtractor
-from auth_rag.indexing.relation.seeder import BaseSeeder, LexicalSeeder, terms  # noqa: F401
+from auth_rag.indexing.relation.seeder import BaseSeeder, LexicalSeeder
 from auth_rag.storing.store import BaseStore
 from auth_rag.types import Chunk, ScoredChunk
 
@@ -50,10 +50,10 @@ class RelationIndex(BaseIndex, ABC):
     and a Cypher traversal are different engines.
 
     **The entry is a seeder**, injected: it decides what a node carries and how a query is
-    read against it. By default it reads the query with the same extractor that built the
-    graph, so the names being matched were produced the same way rather than by a second
-    vocabulary invented for retrieval. The entry is where this family lives or dies — a
-    graph nobody can enter expands nothing, however good it is.
+    read against it. By default it is lexical and reads the query as it is, which costs no
+    call per search; reading it through the extractor first is a choice, made by giving
+    the seeder one. The entry is where this family lives or dies — a graph nobody can
+    enter expands nothing, however good it is.
 
     **It does no filtering, deliberately.** It expands freely and ``retrieve`` applies the
     predicate once, as for the other two. Attributes on the edges with a check per hop
@@ -87,7 +87,7 @@ class RelationIndex(BaseIndex, ABC):
         self.decay = decay  # what one hop costs, multiplicatively
         self.over_fetch = over_fetch  # candidates asked for, per unit of the caller's top_i
         self.max_seeds = max_seeds  # how many entry points one query may open
-        self.seeder = seeder or LexicalSeeder(extractor=extractor)
+        self.seeder = seeder or LexicalSeeder()
 
     def insert(self, chunks: list[Chunk]) -> None:
         """Extract each chunk's relations and hand them to the graph.
@@ -118,17 +118,13 @@ class RelationIndex(BaseIndex, ABC):
         a corpus would grow the graph instead of leaving it as it was."""
 
     @abstractmethod
-    def _seeds(self, query_terms: set[str]) -> dict[str, float]:
-        """Entry points: concept name -> the share of its own name that was matched.
+    def _match(self, roots: list[str]) -> dict[str, float]:
+        """BM25 of these roots against the roots each node carries, for the lexical seeder.
 
-        The lexical seeder's primitive: receives words, from the concepts an extractor named
-        or from the query itself. It stays a token overlap rather than an exact lookup because the two sides
-        do not have to agree on granularity: ingestion may have produced the node
-        ``colite immunocorrelata`` where the query only names ``colite``, and an exact
-        match would find nothing.
-
-        At most ``max_seeds``, best first: a common word would otherwise open half the
-        graph at once.
+        Matched root by root and not as a whole name, because the two sides do not have to
+        agree on granularity: ingestion may have produced the node ``colite
+        immunocorrelata`` where the query only names ``colite``. At most ``max_seeds``,
+        best first.
         """
 
     @abstractmethod

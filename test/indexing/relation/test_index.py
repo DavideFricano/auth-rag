@@ -1,7 +1,7 @@
 """What ``RelationIndex`` owns: turning a chunk into relations, and a traversal into a
 score.
 
-The graph is faked — ``_seeds`` and ``_expand`` return preset rows — so the family's two
+The graph is faked — ``_match`` and ``_expand`` return preset rows — so the family's two
 shared decisions are exercised without an engine underneath. The engines are covered in
 test_graph_index.py.
 """
@@ -12,7 +12,7 @@ from datetime import date
 import pytest
 
 from auth_rag.indexing.relation.extractor import BaseExtractor, Triple
-from auth_rag.indexing.relation.index import Relation, RelationIndex, normalize, terms
+from auth_rag.indexing.relation.index import Relation, RelationIndex, normalize
 from auth_rag.storing.store import VolatileStore
 from auth_rag.types import Chunk, Metadata, Origin, Source
 
@@ -41,7 +41,6 @@ class _FakeGraphIndex(RelationIndex):
         self.added: list[Relation] = []
         self.rows = rows or []
         self.seeds = seeds if seeds is not None else {"seed": 1.0}
-        self.seen_terms: set[str] | None = None
 
     def _add(self, relations: Sequence[Relation]) -> None:
         self.added.extend(relations)
@@ -49,9 +48,8 @@ class _FakeGraphIndex(RelationIndex):
     def delete(self, source_id: str) -> None:  # not under test here
         raise NotImplementedError
 
-    def _seeds(self, query_terms: set[str]) -> dict[str, float]:
-        self.seen_terms = query_terms
-        return self.seeds if query_terms else {}  # no terms, no way in — as a real tier
+    def _match(self, roots: list[str]) -> dict[str, float]:
+        return self.seeds if roots else {}  # no roots, no way in — as a real tier
 
     def _concepts(self, chunk_ids: Sequence[str]) -> Iterable[tuple[str, str]]:
         raise NotImplementedError  # the tiers' own, tested on both of them
@@ -80,10 +78,6 @@ def _index(rows=None, seeds=None, triples=None, named=None, **kwargs) -> _FakeGr
 
 def test_normalize_folds_case_and_spacing():
     assert normalize("  Ipotiroidismo   DI  Grado 1 ") == "ipotiroidismo di grado 1"
-
-
-def test_terms_drops_digits_and_very_short_words():
-    assert terms("Tossicità da ICI e il T1") == {"tossicità", "ici"}
 
 
 # --- insert ---------------------------------------------------------------------------
@@ -146,32 +140,6 @@ def test_a_weak_seed_nearby_can_lose_to_a_strong_seed_further_away():
 def test_no_seeds_means_no_results():
     index = _index(rows=[("c0", 0, 1.0)], seeds={})
     assert index._search("q", top_i=10) == []
-
-
-# --- the entry point: the extractor reads the query, not the query itself --------------
-
-
-def test_the_query_is_read_by_the_extractor():
-    """The same component built the graph and now finds where to enter it, so both sides
-    name concepts the same way instead of the entry inventing a second vocabulary."""
-    index = _index(rows=[("c0", 0, 1.0)], named=["colite immunocorrelata"])
-    index._search("qual è il trattamento della colite?", top_i=10)
-    assert index.extractor.asked == ["qual è il trattamento della colite?"]
-
-
-def test_the_matcher_sees_the_concept_words_not_the_users_words():
-    """"trattamento" and "qual" never reach the matcher: only what the extractor named."""
-    index = _index(rows=[("c0", 0, 1.0)], named=["colite immunocorrelata"])
-    index._search("qual è il trattamento della colite?", top_i=10)
-    assert index.seen_terms == {"colite", "immunocorrelata"}
-
-
-def test_a_query_the_extractor_finds_nothing_in_opens_nothing():
-    """The honest answer: this index has no entry point for that query. No fallback to
-    splitting the query on spaces — that is the vocabulary we just stopped using."""
-    index = _index(rows=[("c0", 0, 1.0)], named=[])
-    assert index._search("qualunque cosa", top_i=10) == []
-    assert index.seen_terms == set()
 
 
 def test_ties_are_broken_by_id_so_the_answer_is_reproducible():

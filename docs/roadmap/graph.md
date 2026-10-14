@@ -349,9 +349,10 @@ tornerebbe a confrontare una query lunga con nomi corti.
 | **con `extractor`**: i concetti estratti | come `LLMSynonymRetriever` di LlamaIndex | come LightRAG e HippoRAG: corto con corto, il caso migliore |
 
 La rappresentazione sui nodi è una per tipo di confronto, e l'`extractor` non ne aggiunge: i concetti estratti
-si leggono come si legge la query. Il default è `LexicalSeeder(extractor=extractor)`, con l'estrattore che il
-grafo ha già e nient'altro da configurare: è l'ingresso di oggi, con radici e IDF al posto delle parole
-intere di `terms()`, che spariscono.
+si leggono come si legge la query. Il default è `LexicalSeeder()`, la query così com'è: con stopword e
+IDF le parole della domanda escono da sole, quindi non serve una chiamata all'LLM per ogni ricerca, e la
+stessa domanda apre sempre gli stessi semi. Leggerla prima con l'estrattore è una scelta, che costa quella
+chiamata. Le parole intere di `terms()`, il vecchio ingresso, sono sparite.
 
 Il lessicale legge query, concetti e chunk allo stesso modo; l'IDF si ricava dal grafo stesso, contando in
 quanti concetti compare ogni radice. Risolve il problema della parola comune meglio di `max_seeds`, che
@@ -387,9 +388,9 @@ estratto in una funzione sola: due chiamanti, un controllo.
 1. `READ_IN` → `FROM_CHUNK`.
 2. `expand(found, filter)` sul `RelationIndex`, con lo score ereditato.
 3. Lo stadio di espansione in `QueryPipeline`, come campo `expander`, e nella facade.
-4. Seeder iniettabile per l'ingresso dalla query, in tre tempi: la porta `BaseSeeder` con l'ingresso di
-   oggi spostato dentro senza cambiarne il comportamento; il `LexicalSeeder`, con `extractor`, che lo sostituisce
-   come default; il `SemanticSeeder`, con lo stesso `extractor`. I nodi portano le radici, il vettore denso o
+4. Seeder iniettabile per l'ingresso dalla query, in tre tempi: ✅ la porta `BaseSeeder` con l'ingresso di
+   allora spostato dentro senza cambiarne il comportamento; ✅ il `LexicalSeeder` su radici e BM25, con
+   `extractor` opzionale, default sulla query così com'è; il `SemanticSeeder`, con lo stesso `extractor`. I nodi portano le radici, il vettore denso o
    entrambi, secondo il seeder configurato, calcolati in ingestion; in Neo4j un full-text index `whitespace`
    sulle radici e un indice vettoriale sul denso.
 5. Traversata iniettabile, con PageRank personalizzato accanto al decadimento.
