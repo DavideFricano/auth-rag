@@ -7,7 +7,8 @@ from neo4j import Driver, GraphDatabase
 
 from auth_rag.authorization.schema import AccessSchema
 from auth_rag.indexing.relation.extractor import BaseExtractor
-from auth_rag.indexing.relation.index import Relation, RelationIndex, terms
+from auth_rag.indexing.relation.index import Relation, RelationIndex
+from auth_rag.indexing.relation.seeder import BaseSeeder
 from auth_rag.storing.store import BaseStore
 
 
@@ -32,8 +33,9 @@ class VolatileGraphIndex(RelationIndex):
         decay: float = 0.5,
         over_fetch: int = 3,
         max_seeds: int = 10,
+        seeder: BaseSeeder | None = None,
     ) -> None:
-        super().__init__(store, extractor, schema, hops, decay, over_fetch, max_seeds)
+        super().__init__(store, extractor, schema, hops, decay, over_fetch, max_seeds, seeder)
         self.graph = nx.MultiGraph()
         self.by_chunk: dict[str, set[str]] = {}  # the reverse of each node's "chunks"
 
@@ -42,7 +44,7 @@ class VolatileGraphIndex(RelationIndex):
             for name in (relation.subject, relation.object):
                 if name not in self.graph:
                     # cached: seeding scans every name, and that is the one hot loop here
-                    self.graph.add_node(name, tokens=terms(name), chunks={})
+                    self.graph.add_node(name, chunks={}, **self.seeder.represent(name))
                 self.graph.nodes[name]["chunks"][relation.chunk_id] = relation.source_id
                 self.by_chunk.setdefault(relation.chunk_id, set()).add(name)
             self.graph.add_edge(
@@ -75,7 +77,7 @@ class VolatileGraphIndex(RelationIndex):
             return {}
         found = []
         for name, data in self.graph.nodes(data=True):
-            tokens: set[str] = data["tokens"]
+            tokens = set(data["tokens"])
             shared = len(tokens & query_terms)
             if shared:
                 # share of the *name* matched: a concept the query names outright beats a
@@ -145,8 +147,9 @@ class RemoteGraphIndex(RelationIndex):
         decay: float = 0.5,
         over_fetch: int = 3,
         max_seeds: int = 10,
+        seeder: BaseSeeder | None = None,
     ) -> None:
-        super().__init__(store, extractor, schema, hops, decay, over_fetch, max_seeds)
+        super().__init__(store, extractor, schema, hops, decay, over_fetch, max_seeds, seeder)
         self.driver = driver if driver is not None else GraphDatabase.driver(url, auth=auth)
         self.database = database
         self._ready = False
@@ -181,10 +184,10 @@ class RemoteGraphIndex(RelationIndex):
         rows = [
             {
                 "subject": relation.subject,
-                "subject_tokens": sorted(terms(relation.subject)),
+                "subject_props": self.seeder.represent(relation.subject),
                 "predicate": relation.predicate,
                 "object": relation.object,
-                "object_tokens": sorted(terms(relation.object)),
+                "object_props": self.seeder.represent(relation.object),
                 "chunk_id": relation.chunk_id,
                 "source_id": relation.source_id,
             }
@@ -194,9 +197,9 @@ class RemoteGraphIndex(RelationIndex):
             """
             UNWIND $rows AS row
             MERGE (s:Concept {name: row.subject})
-              ON CREATE SET s.tokens = row.subject_tokens
+              ON CREATE SET s += row.subject_props
             MERGE (o:Concept {name: row.object})
-              ON CREATE SET o.tokens = row.object_tokens
+              ON CREATE SET o += row.object_props
             MERGE (c:Chunk {id: row.chunk_id})
               SET c.source_id = row.source_id
             MERGE (s)-[:FROM_CHUNK]->(c)

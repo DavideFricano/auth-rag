@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Sequence
 
@@ -10,27 +9,15 @@ from auth_rag.authorization.filter import Filter
 from auth_rag.authorization.schema import AccessSchema
 from auth_rag.indexing.index import BaseIndex
 from auth_rag.indexing.relation.extractor import BaseExtractor
+from auth_rag.indexing.relation.seeder import BaseSeeder, LexicalSeeder, terms  # noqa: F401
 from auth_rag.storing.store import BaseStore
 from auth_rag.types import Chunk, ScoredChunk
-
-_WORD = re.compile(r"[^\W\d_]+", re.UNICODE)
 
 
 def normalize(name: str) -> str:
     """Canonical spelling of a concept name: nodes merge by name, and the merge is what
     builds the bridges, so casing and spacing must not decide whether one exists."""
     return " ".join(name.lower().split())
-
-
-def terms(name: str) -> set[str]:
-    """Words of a concept name, for matching one name against another.
-
-    Both sides are concept names — the extractor produces them at ingestion and again
-    from the query — so this is a matcher, never the way a query enters the graph.
-    Digits and words under three letters are dropped: they match too much to carry
-    signal, at the cost of short acronyms, which cannot be seeds.
-    """
-    return {word for word in _WORD.findall(name.lower()) if len(word) > 2}
 
 
 class Relation(BaseModel):
@@ -62,10 +49,11 @@ class RelationIndex(BaseIndex, ABC):
     ``SimilarityIndex``, which is one Qdrant client built three ways, an in-process walk
     and a Cypher traversal are different engines.
 
-    **Both sides go through the extractor**: it reads chunks to build the graph and reads
-    the query to find where to enter it, so the names being matched were produced the same
-    way rather than by a second vocabulary invented for retrieval. The entry is where this
-    family lives or dies — a graph nobody can enter expands nothing, however good it is.
+    **The entry is a seeder**, injected: it decides what a node carries and how a query is
+    read against it. By default it reads the query with the same extractor that built the
+    graph, so the names being matched were produced the same way rather than by a second
+    vocabulary invented for retrieval. The entry is where this family lives or dies — a
+    graph nobody can enter expands nothing, however good it is.
 
     **It does no filtering, deliberately.** It expands freely and ``retrieve`` applies the
     predicate once, as for the other two. Attributes on the edges with a check per hop
@@ -85,6 +73,7 @@ class RelationIndex(BaseIndex, ABC):
         decay: float = 0.5,
         over_fetch: int = 3,
         max_seeds: int = 10,
+        seeder: BaseSeeder | None = None,
     ) -> None:
         super().__init__(store, schema)
         if hops < 1:
@@ -98,6 +87,7 @@ class RelationIndex(BaseIndex, ABC):
         self.decay = decay  # what one hop costs, multiplicatively
         self.over_fetch = over_fetch  # candidates asked for, per unit of the caller's top_i
         self.max_seeds = max_seeds  # how many entry points one query may open
+        self.seeder = seeder or LexicalSeeder(extractor=extractor)
 
     def insert(self, chunks: list[Chunk]) -> None:
         """Extract each chunk's relations and hand them to the graph.
@@ -131,8 +121,8 @@ class RelationIndex(BaseIndex, ABC):
     def _seeds(self, query_terms: set[str]) -> dict[str, float]:
         """Entry points: concept name -> the share of its own name that was matched.
 
-        Receives the words of the concepts the extractor named, not the words of the
-        query. It stays a token overlap rather than an exact lookup because the two sides
+        The lexical seeder's primitive: receives words, from the concepts an extractor named
+        or from the query itself. It stays a token overlap rather than an exact lookup because the two sides
         do not have to agree on granularity: ingestion may have produced the node
         ``colite immunocorrelata`` where the query only names ``colite``, and an exact
         match would find nothing.
@@ -151,17 +141,11 @@ class RelationIndex(BaseIndex, ABC):
         Duplicates are expected — picking the best is ``_search``'s job."""
 
     def _search(self, query: str, top_i: int) -> list[tuple[str, float]]:
-        """Entities, seeds, expansion, and the step that turns reachability into a score.
+        """Seeds, expansion, and the step that turns reachability into a score.
 
-        **The query is read by the same extractor that built the graph**, which is what
-        keeps the two sides speaking one vocabulary: the entry is not a second way of
-        naming concepts invented for retrieval. Splitting the query on whitespace instead
-        would hand the matcher the words the *user* chose — "how", "treated" — rather than
-        the concepts a document would name.
-
-        A query the extractor finds no concept in opens nothing, and that is the honest
-        answer: this index has no entry point for it. The similarity indexes are still
-        answering, so the pipeline is not left empty.
+        The seeder decides where the query enters. A query it finds no concept for opens
+        nothing, and that is the honest answer: this index has no entry point for it. The
+        similarity indexes are still answering, so the pipeline is not left empty.
 
         A traversal then yields reachability, not similarity, so the score is invented:
         ``seed * decay ** hop``. Monotone and one parameter, at the price of ignoring how
@@ -172,8 +156,7 @@ class RelationIndex(BaseIndex, ABC):
         each list's extremes or moments and would hand the graph whatever weight the shape
         of the decay curve implied. Calibrating instead would need an evaluation harness.
         """
-        named = self.extractor.entities(query)
-        seeds = self._seeds({term for name in named for term in terms(name)})
+        seeds = self.seeder.seeds(query, self)
         if not seeds:
             return []
         best: dict[str, float] = {}

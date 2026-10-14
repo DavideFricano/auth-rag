@@ -23,6 +23,7 @@ from auth_rag.authorization.schema import AccessSchema, Attribute, AttributeType
 from auth_rag.errors import EnforcementError
 from auth_rag.indexing.relation.extractor import BaseExtractor, Triple
 from auth_rag.indexing.relation.graph_index import RemoteGraphIndex, VolatileGraphIndex
+from auth_rag.indexing.relation.seeder import BaseSeeder, LexicalSeeder
 from auth_rag.storing.store import VolatileStore
 from auth_rag.types import Chunk, Metadata, Origin, ScoredChunk, Source
 
@@ -225,7 +226,10 @@ def test_delete_then_insert_rebuilds_the_source_cleanly(build):
     chunks = [_chunk("c0", "doc1")]
     index = build(chunks, {"c0": [("colite", "p", "steroidi")]})
     index.delete("doc1")
-    index.extractor = _ScriptedExtractor({"c0": [("colite", "p", "budesonide")]})
+    # both sides: the index extracts at ingestion, its seeder reads the query
+    index.extractor = index.seeder.extractor = _ScriptedExtractor(
+        {"c0": [("colite", "p", "budesonide")]}
+    )
     index.insert(chunks)
     assert index._search("steroidi", top_i=10) == []
     assert set(dict(index._search("budesonide", top_i=10))) == {"c0"}
@@ -244,6 +248,44 @@ def test_delete_removes_the_nodes_left_with_nothing(build):
     )
     index.delete("doc1")
     assert _concepts(index) == {"colite", "ctcae"}  # "steroidi" was doc1's alone
+
+
+# --- seeders: where a query enters ------------------------------------------------------
+
+
+class _FixedSeeder(BaseSeeder):
+    """Enters from one concept whatever the query, and marks the nodes it sees created."""
+
+    def represent(self, name: str) -> dict[str, object]:
+        return {"mark": name.upper()}
+
+    def seeds(self, query: str, graph) -> dict[str, float]:
+        return {"steroidi": 1.0}
+
+
+def _mark(index, name: str) -> str:
+    if isinstance(index, VolatileGraphIndex):
+        return index.graph.nodes[name]["mark"]
+    return index._run("MATCH (n:Concept {name: $name}) RETURN n.mark AS mark", name=name)[0]["mark"]
+
+
+def test_the_seeder_decides_what_a_node_carries_and_where_a_query_enters(build):
+    index = build(
+        [_chunk("c0"), _chunk("c1")],
+        {"c0": [("colite", "p", "steroidi")], "c1": [("glicemia", "p", "insulina")]},
+        seeder=_FixedSeeder(),
+    )
+    assert _mark(index, "colite") == "COLITE"
+    assert set(dict(index._search("anything at all", top_i=10))) == {"c0"}
+
+
+def test_a_lexical_seeder_without_extractor_reads_the_query_itself(build):
+    index = build(
+        [_chunk("c0"), _chunk("c1")],
+        {"c0": [("colite", "p", "steroidi")], "c1": [("glicemia", "p", "insulina")]},
+        seeder=LexicalSeeder(),
+    )
+    assert set(dict(index._search("come si cura la colite?", top_i=10))) == {"c0"}
 
 
 # --- expansion: entering from the chunks the retrievers found ---------------------------

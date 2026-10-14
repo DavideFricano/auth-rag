@@ -337,12 +337,21 @@ volatile, quello dei test e dello sviluppo, e il remoto, quello della produzione
 diversi per la stessa query. Il denso usa l'indice vettoriale di Neo4j.
 
 **Ingresso.** Index e seeder sono cose diverse: un index ordina chunk, un seeder trasforma una query in
-concetti di partenza. Un seeder è la composizione di due scelte indipendenti:
+concetti di partenza. Un seeder è la composizione di due scelte indipendenti: **come confronta** — è la
+classe, `LexicalSeeder` (BM25 sulle radici) o `SemanticSeeder` (coseno fra embedding) — e **che cosa
+confronta**, la query così com'è oppure, con un `extractor`, i concetti che un LLM ne estrae, confrontati
+ciascuno per conto suo e uniti tenendo per ogni nodo il punteggio migliore. Unirli in una stringa sola
+tornerebbe a confrontare una query lunga con nomi corti.
 
-| | la query così com'è | entità estratte da un LLM |
+| | `LexicalSeeder` | `SemanticSeeder` |
 |---|---|---|
-| **confronto lessicale** — BM25 sulle radici, peso IDF fra i nomi dei concetti | `LexicalSeeder` | ciò che c'è oggi, migliorato |
-| **confronto semantico** — coseno fra vettori densi | query intera contro i nomi | entità contro nomi, corto con corto: il caso migliore |
+| **la query così com'è** | BM25 sui nomi dei nodi; stopword e IDF tolgono le parole della domanda | come la *local search* di Microsoft GraphRAG, che però confronta descrizioni e non nomi |
+| **con `extractor`**: i concetti estratti | come `LLMSynonymRetriever` di LlamaIndex | come LightRAG e HippoRAG: corto con corto, il caso migliore |
+
+La rappresentazione sui nodi è una per tipo di confronto, e l'`extractor` non ne aggiunge: i concetti estratti
+si leggono come si legge la query. Il default è `LexicalSeeder(extractor=extractor)`, con l'estrattore che il
+grafo ha già e nient'altro da configurare: è l'ingresso di oggi, con radici e IDF al posto delle parole
+intere di `terms()`, che spariscono.
 
 Il lessicale legge query, concetti e chunk allo stesso modo; l'IDF si ricava dal grafo stesso, contando in
 quanti concetti compare ogni radice. Risolve il problema della parola comune meglio di `max_seeds`, che
@@ -378,10 +387,11 @@ estratto in una funzione sola: due chiamanti, un controllo.
 1. `READ_IN` → `FROM_CHUNK`.
 2. `expand(found, filter)` sul `RelationIndex`, con lo score ereditato.
 3. Lo stadio di espansione in `QueryPipeline`, come campo `expander`, e nella facade.
-4. Seeder iniettabile per l'ingresso dalla query: confronto lessicale e semantico, sulla query così com'è
-   o sulle entità estratte da un LLM. I nodi portano le radici, il vettore denso o entrambi, secondo il
-   seeder configurato, calcolati in ingestion; in Neo4j un full-text index `whitespace` sulle radici e un
-   indice vettoriale sul denso.
+4. Seeder iniettabile per l'ingresso dalla query, in tre tempi: la porta `BaseSeeder` con l'ingresso di
+   oggi spostato dentro senza cambiarne il comportamento; il `LexicalSeeder`, con `extractor`, che lo sostituisce
+   come default; il `SemanticSeeder`, con lo stesso `extractor`. I nodi portano le radici, il vettore denso o
+   entrambi, secondo il seeder configurato, calcolati in ingestion; in Neo4j un full-text index `whitespace`
+   sulle radici e un indice vettoriale sul denso.
 5. Traversata iniettabile, con PageRank personalizzato accanto al decadimento.
 6. L'harness, che resta il debito: per confrontare senza grafo, grafo in parallelo, grafo come espansione,
    e i seeder fra loro.

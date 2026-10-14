@@ -26,6 +26,7 @@ from auth_rag.indexing.index import BaseIndex
 from auth_rag.indexing.relation.extractor import BaseExtractor, LLMExtractor, Triple
 from auth_rag.indexing.relation.graph_index import RemoteGraphIndex, VolatileGraphIndex
 from auth_rag.indexing.relation.index import Relation, RelationIndex
+from auth_rag.indexing.relation.seeder import BaseSeeder, LexicalSeeder
 from auth_rag.indexing.similarity.lexical_index import (
     LexicalIndex,
     PersistentLexicalIndex,
@@ -102,6 +103,7 @@ __all__ = [
     "BaseLabeler",
     "BaseLoader",
     "BaseRanker",
+    "BaseSeeder",
     "BaseStore",
     "Chunk",
     "Clause",
@@ -123,6 +125,7 @@ __all__ = [
     "LLMExtractor",
     "Language",
     "LexicalIndex",
+    "LexicalSeeder",
     "LocalEmbedder",
     "LocalLoader",
     "ManifestLabeler",
