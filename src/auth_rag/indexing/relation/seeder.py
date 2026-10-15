@@ -10,6 +10,7 @@ import nltk
 from nltk.corpus import stopwords
 from nltk.stem.snowball import SnowballStemmer
 
+from auth_rag.embedding.embedder import BaseEmbedder
 from auth_rag.indexing.relation.extractor import BaseExtractor
 from auth_rag.types import Language
 
@@ -60,6 +61,22 @@ def bm25(
     return scores
 
 
+def _best(
+    found: list[dict[str, float]], limit: int, floor: float = 0.0
+) -> dict[str, float]:
+    """The best score each concept got, scaled so the strongest is 1, at most ``limit``."""
+    best: dict[str, float] = {}
+    for scores in found:
+        for name, score in scores.items():
+            if score > floor:
+                best[name] = max(best.get(name, 0.0), score)
+    if not best:
+        return {}
+    top = max(best.values())
+    ranked = sorted(best.items(), key=lambda row: (-row[1], row[0]))
+    return {name: score / top for name, score in ranked[:limit]}
+
+
 class BaseSeeder(ABC):
     """Where a query enters the graph: which concepts it starts from, and how strongly.
 
@@ -99,12 +116,39 @@ class LexicalSeeder(BaseSeeder):
 
     def seeds(self, query: str, graph: RelationIndex) -> dict[str, float]:
         texts = self.extractor.entities(query) if self.extractor is not None else [query]
-        best: dict[str, float] = {}
-        for text in texts:
-            for name, score in graph._match(roots(text, self.language)).items():
-                best[name] = max(best.get(name, 0.0), score)
-        if not best:
-            return {}
-        top = max(best.values())
-        ranked = sorted(best.items(), key=lambda row: (-row[1], row[0]))
-        return {name: score / top for name, score in ranked[: graph.max_seeds]}
+        found = [graph._match(roots(text, self.language)) for text in texts]
+        return _best(found, graph.max_seeds)
+
+
+class SemanticSeeder(BaseSeeder):
+    """Cosine between the query and the embeddings of the concept names.
+
+    Finds what no word match can — "steroidi" near "corticosteroidi" — at the price of an
+    embedding per node. With an ``extractor`` each concept it names is embedded on its own:
+    short against short is where similarity of names works best, and a whole question is
+    further from a two-word name than any two names are. Concepts at or below
+    ``min_similarity`` are not entered, since a cosine is never zero and would otherwise
+    open ``max_seeds`` doors for any query at all.
+    """
+
+    def __init__(
+        self,
+        embedder: BaseEmbedder,
+        extractor: BaseExtractor | None = None,
+        min_similarity: float = 0.0,
+    ) -> None:
+        self.embedder = embedder
+        self.extractor = extractor
+        self.min_similarity = min_similarity
+
+    def represent(self, name: str) -> dict[str, object]:
+        return {"embedding": self.embedder.embed_chunks([name])[0].tolist()}
+
+    def seeds(self, query: str, graph: RelationIndex) -> dict[str, float]:
+        if self.extractor is None:
+            vectors = self.embedder.embed_query(query)
+        else:
+            named = self.extractor.entities(query)
+            vectors = self.embedder.embed_chunks(named) if named else []
+        found = [graph._nearest(vector.tolist()) for vector in vectors]
+        return _best(found, graph.max_seeds, self.min_similarity)

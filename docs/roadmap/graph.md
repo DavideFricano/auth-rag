@@ -348,6 +348,13 @@ tornerebbe a confrontare una query lunga con nomi corti.
 | **la query così com'è** | BM25 sui nomi dei nodi; stopword e IDF tolgono le parole della domanda | come la *local search* di Microsoft GraphRAG, che però confronta descrizioni e non nomi |
 | **con `extractor`**: i concetti estratti | come `LLMSynonymRetriever` di LlamaIndex | come LightRAG e HippoRAG: corto con corto, il caso migliore |
 
+Il grafo riceve una **lista di seeder**, non uno solo: li interroga tutti e per ogni concetto tiene il
+punteggio migliore, che ogni seeder ha già portato fra 0 e 1. L'ordine non conta. Un nodo porta ciò che
+serve a ciascuno, quindi lessicale e semantico insieme aprono ciascuno le proprie porte; una lista vuota
+non apre niente da una query, ed è il caso di un grafo usato solo come expander. Il `SemanticSeeder` ha
+anche una soglia, `min_similarity`: un coseno non è mai zero, e senza soglia ogni query aprirebbe
+`max_seeds` porte qualunque cosa chieda.
+
 La rappresentazione sui nodi è una per tipo di confronto, e l'`extractor` non ne aggiunge: i concetti estratti
 si leggono come si legge la query. Il default è `LexicalSeeder()`, la query così com'è: con stopword e
 IDF le parole della domanda escono da sole, quindi non serve una chiamata all'LLM per ogni ricerca, e la
@@ -390,7 +397,8 @@ estratto in una funzione sola: due chiamanti, un controllo.
 3. Lo stadio di espansione in `QueryPipeline`, come campo `expander`, e nella facade.
 4. Seeder iniettabile per l'ingresso dalla query, in tre tempi: ✅ la porta `BaseSeeder` con l'ingresso di
    allora spostato dentro senza cambiarne il comportamento; ✅ il `LexicalSeeder` su radici e BM25, con
-   `extractor` opzionale, default sulla query così com'è; il `SemanticSeeder`, con lo stesso `extractor`. I nodi portano le radici, il vettore denso o
+   `extractor` opzionale, default sulla query così com'è; ✅ il `SemanticSeeder`, con lo stesso `extractor`;
+   ✅ una lista di seeder invece di uno solo, fusa per concetto. I nodi portano le radici, il vettore denso o
    entrambi, secondo il seeder configurato, calcolati in ingestion; in Neo4j un full-text index `whitespace`
    sulle radici e un indice vettoriale sul denso.
 5. Traversata iniettabile, con PageRank personalizzato accanto al decadimento.

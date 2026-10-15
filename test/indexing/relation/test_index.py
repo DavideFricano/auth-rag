@@ -51,6 +51,9 @@ class _FakeGraphIndex(RelationIndex):
     def _match(self, roots: list[str]) -> dict[str, float]:
         return self.seeds if roots else {}  # no roots, no way in — as a real tier
 
+    def _nearest(self, vector: list[float]) -> dict[str, float]:
+        raise NotImplementedError
+
     def _concepts(self, chunk_ids: Sequence[str]) -> Iterable[tuple[str, str]]:
         raise NotImplementedError  # the tiers' own, tested on both of them
 

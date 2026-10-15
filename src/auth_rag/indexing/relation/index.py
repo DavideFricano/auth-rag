@@ -9,7 +9,7 @@ from auth_rag.authorization.filter import Filter
 from auth_rag.authorization.schema import AccessSchema
 from auth_rag.indexing.index import BaseIndex
 from auth_rag.indexing.relation.extractor import BaseExtractor
-from auth_rag.indexing.relation.seeder import BaseSeeder, LexicalSeeder
+from auth_rag.indexing.relation.seeder import BaseSeeder, LexicalSeeder, _best
 from auth_rag.storing.store import BaseStore
 from auth_rag.types import Chunk, ScoredChunk
 
@@ -49,11 +49,13 @@ class RelationIndex(BaseIndex, ABC):
     ``SimilarityIndex``, which is one Qdrant client built three ways, an in-process walk
     and a Cypher traversal are different engines.
 
-    **The entry is a seeder**, injected: it decides what a node carries and how a query is
-    read against it. By default it is lexical and reads the query as it is, which costs no
-    call per search; reading it through the extractor first is a choice, made by giving
-    the seeder one. The entry is where this family lives or dies — a graph nobody can
-    enter expands nothing, however good it is.
+    **The entry is a list of seeders**, injected: each decides what a node carries and how a
+    query is read against it, and the graph enters from the best each concept scored with
+    any of them. By default one, lexical, reading the query as it is, which costs no call
+    per search; reading it through the extractor first is a choice, made by giving a seeder
+    one. An empty list leaves no entry from a query, for a graph used only as an expander.
+    The entry is where this family lives or dies — a graph nobody can enter expands
+    nothing, however good it is.
 
     **It does no filtering, deliberately.** It expands freely and ``retrieve`` applies the
     predicate once, as for the other two. Attributes on the edges with a check per hop
@@ -73,7 +75,7 @@ class RelationIndex(BaseIndex, ABC):
         decay: float = 0.5,
         over_fetch: int = 3,
         max_seeds: int = 10,
-        seeder: BaseSeeder | None = None,
+        seeders: list[BaseSeeder] | None = None,
     ) -> None:
         super().__init__(store, schema)
         if hops < 1:
@@ -87,7 +89,7 @@ class RelationIndex(BaseIndex, ABC):
         self.decay = decay  # what one hop costs, multiplicatively
         self.over_fetch = over_fetch  # candidates asked for, per unit of the caller's top_i
         self.max_seeds = max_seeds  # how many entry points one query may open
-        self.seeder = seeder or LexicalSeeder()
+        self.seeders = seeders if seeders is not None else [LexicalSeeder()]
 
     def insert(self, chunks: list[Chunk]) -> None:
         """Extract each chunk's relations and hand them to the graph.
@@ -112,6 +114,12 @@ class RelationIndex(BaseIndex, ABC):
                 )
         self._add(relations)
 
+    def _represent(self, name: str) -> dict[str, object]:
+        """What a new node carries: what every seeder needs to find it by."""
+        return {
+            key: value for seeder in self.seeders for key, value in seeder.represent(name).items()
+        }
+
     @abstractmethod
     def _add(self, relations: Sequence[Relation]) -> None:
         """Record these relations; the same relation twice is one edge, or re-ingesting
@@ -128,6 +136,11 @@ class RelationIndex(BaseIndex, ABC):
         """
 
     @abstractmethod
+    def _nearest(self, vector: list[float]) -> dict[str, float]:
+        """Cosine of this vector against the embedding each node carries, for the semantic
+        seeder. At most ``max_seeds``, best first."""
+
+    @abstractmethod
     def _concepts(self, chunk_ids: Sequence[str]) -> Iterable[tuple[str, str]]:
         """``(chunk_id, concept name)`` for each concept these chunks were read in."""
 
@@ -139,7 +152,7 @@ class RelationIndex(BaseIndex, ABC):
     def _search(self, query: str, top_i: int) -> list[tuple[str, float]]:
         """Seeds, expansion, and the step that turns reachability into a score.
 
-        The seeder decides where the query enters. A query it finds no concept for opens
+        The seeders decide where the query enters. A query it finds no concept for opens
         nothing, and that is the honest answer: this index has no entry point for it. The
         similarity indexes are still answering, so the pipeline is not left empty.
 
@@ -152,7 +165,7 @@ class RelationIndex(BaseIndex, ABC):
         each list's extremes or moments and would hand the graph whatever weight the shape
         of the decay curve implied. Calibrating instead would need an evaluation harness.
         """
-        seeds = self.seeder.seeds(query, self)
+        seeds = _best([seeder.seeds(query, self) for seeder in self.seeders], self.max_seeds)
         if not seeds:
             return []
         best: dict[str, float] = {}

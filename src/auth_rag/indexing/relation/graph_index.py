@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 
 import networkx as nx
+import numpy as np
 from neo4j import Driver, GraphDatabase
 
 from auth_rag.authorization.schema import AccessSchema
@@ -33,9 +34,9 @@ class VolatileGraphIndex(RelationIndex):
         decay: float = 0.5,
         over_fetch: int = 3,
         max_seeds: int = 10,
-        seeder: BaseSeeder | None = None,
+        seeders: list[BaseSeeder] | None = None,
     ) -> None:
-        super().__init__(store, extractor, schema, hops, decay, over_fetch, max_seeds, seeder)
+        super().__init__(store, extractor, schema, hops, decay, over_fetch, max_seeds, seeders)
         self.graph = nx.MultiGraph()
         self.by_chunk: dict[str, set[str]] = {}  # the reverse of each node's "chunks"
 
@@ -43,7 +44,7 @@ class VolatileGraphIndex(RelationIndex):
         for relation in relations:
             for name in (relation.subject, relation.object):
                 if name not in self.graph:
-                    self.graph.add_node(name, chunks={}, **self.seeder.represent(name))
+                    self.graph.add_node(name, chunks={}, **self._represent(name))
                 self.graph.nodes[name]["chunks"][relation.chunk_id] = relation.source_id
                 self.by_chunk.setdefault(relation.chunk_id, set()).add(name)
             self.graph.add_edge(
@@ -78,6 +79,17 @@ class VolatileGraphIndex(RelationIndex):
             if "roots" in data
         }
         ranked = sorted(bm25(documents, roots).items(), key=lambda row: (-row[1], row[0]))
+        return dict(ranked[: self.max_seeds])
+
+    def _nearest(self, vector: list[float]) -> dict[str, float]:
+        names = [name for name, data in self.graph.nodes(data=True) if "embedding" in data]
+        if not names:
+            return {}
+        matrix = np.array([self.graph.nodes[name]["embedding"] for name in names])
+        norms = np.linalg.norm(matrix, axis=1) * np.linalg.norm(vector)
+        similarity = matrix @ np.array(vector) / np.where(norms == 0, 1.0, norms)
+        scored = zip(names, similarity.tolist(), strict=True)
+        ranked = sorted(scored, key=lambda row: (-row[1], row[0]))
         return dict(ranked[: self.max_seeds])
 
     def _concepts(self, chunk_ids: Sequence[str]) -> Iterable[tuple[str, str]]:
@@ -141,12 +153,13 @@ class RemoteGraphIndex(RelationIndex):
         decay: float = 0.5,
         over_fetch: int = 3,
         max_seeds: int = 10,
-        seeder: BaseSeeder | None = None,
+        seeders: list[BaseSeeder] | None = None,
     ) -> None:
-        super().__init__(store, extractor, schema, hops, decay, over_fetch, max_seeds, seeder)
+        super().__init__(store, extractor, schema, hops, decay, over_fetch, max_seeds, seeders)
         self.driver = driver if driver is not None else GraphDatabase.driver(url, auth=auth)
         self.database = database
         self._ready = False
+        self._vectors_ready = False
 
     def _run(self, query: str, **parameters) -> list[dict]:
         with self.driver.session(database=self.database) as session:
@@ -176,6 +189,18 @@ class RemoteGraphIndex(RelationIndex):
         )
         self._run("CALL db.awaitIndexes()")
 
+    def _ensure_vector_index(self, dimensions: int) -> None:
+        """Created on first sight of a vector, because its size comes from the embedder."""
+        if self._vectors_ready:
+            return
+        self._vectors_ready = True
+        self._run(
+            "CREATE VECTOR INDEX concept_embedding IF NOT EXISTS FOR (n:Concept) ON n.embedding "
+            f"OPTIONS {{indexConfig: {{`vector.dimensions`: {int(dimensions)}, "
+            "`vector.similarity_function`: 'cosine'}}"
+        )
+        self._run("CALL db.awaitIndexes()")
+
     def _add(self, relations: Sequence[Relation]) -> None:
         if not relations:
             return
@@ -183,15 +208,18 @@ class RemoteGraphIndex(RelationIndex):
         rows = [
             {
                 "subject": relation.subject,
-                "subject_props": self.seeder.represent(relation.subject),
+                "subject_props": self._represent(relation.subject),
                 "predicate": relation.predicate,
                 "object": relation.object,
-                "object_props": self.seeder.represent(relation.object),
+                "object_props": self._represent(relation.object),
                 "chunk_id": relation.chunk_id,
                 "source_id": relation.source_id,
             }
             for relation in relations
         ]
+        embedded = [row["subject_props"] for row in rows if "embedding" in row["subject_props"]]
+        if embedded:
+            self._ensure_vector_index(len(embedded[0]["embedding"]))
         self._run(  # every MERGE is on the identity of the thing, so this upserts
             """
             UNWIND $rows AS row
@@ -247,6 +275,22 @@ class RemoteGraphIndex(RelationIndex):
             limit=self.max_seeds,
         )
         return {row["name"]: float(row["score"]) for row in rows}
+
+    def _nearest(self, vector: list[float]) -> dict[str, float]:
+        """Neo4j scores a cosine as ``(1 + cosine) / 2``; it is turned back into a cosine so
+        both tiers hand the seeder the same numbers."""
+        self._ensure_vector_index(len(vector))
+        rows = self._run(
+            """
+            CALL db.index.vector.queryNodes('concept_embedding', $limit, $vector)
+            YIELD node, score
+            RETURN node.name AS name, 2 * score - 1 AS similarity
+            ORDER BY similarity DESC, name ASC
+            """,
+            vector=vector,
+            limit=self.max_seeds,
+        )
+        return {row["name"]: float(row["similarity"]) for row in rows}
 
     def _concepts(self, chunk_ids: Sequence[str]) -> Iterable[tuple[str, str]]:
         rows = self._run(

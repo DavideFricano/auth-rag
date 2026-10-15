@@ -16,14 +16,16 @@ similarity family. The Neo4j tier needs a server and is skipped unless one is po
 import os
 from datetime import date
 
+import numpy as np
 import pytest
 
 from auth_rag.authorization.filter import Allow, Match
 from auth_rag.authorization.schema import AccessSchema, Attribute, AttributeType
+from auth_rag.embedding.embedder import BaseEmbedder
 from auth_rag.errors import EnforcementError
 from auth_rag.indexing.relation.extractor import BaseExtractor, Triple
 from auth_rag.indexing.relation.graph_index import RemoteGraphIndex, VolatileGraphIndex
-from auth_rag.indexing.relation.seeder import BaseSeeder, LexicalSeeder, roots
+from auth_rag.indexing.relation.seeder import BaseSeeder, LexicalSeeder, SemanticSeeder, roots
 from auth_rag.storing.store import VolatileStore
 from auth_rag.types import Chunk, Language, Metadata, Origin, ScoredChunk, Source
 
@@ -174,7 +176,7 @@ def test_matching_prefers_the_concept_the_query_names_outright(build):
     index = build(
         [_chunk("c0")],
         {"c0": [("colite", "p", "colite immunocorrelata di grado tre")]},
-        seeder=LexicalSeeder(language=Language.ITALIAN),
+        seeders=[LexicalSeeder(language=Language.ITALIAN)],
     )
     matched = index._match(roots("colite", Language.ITALIAN))
     assert list(matched) == ["colite", "colite immunocorrelata di grado tre"]
@@ -184,7 +186,7 @@ def test_a_root_every_concept_shares_weighs_less_than_a_rare_one(build):
     index = build(
         [_chunk("c0")],
         {"c0": [("colite acuta", "p", "colite cronica"), ("colite", "p", "budesonide")]},
-        seeder=LexicalSeeder(language=Language.ITALIAN),
+        seeders=[LexicalSeeder(language=Language.ITALIAN)],
     )
     matched = index._match(roots("colite cronica", Language.ITALIAN))
     assert next(iter(matched)) == "colite cronica"
@@ -194,7 +196,7 @@ def test_a_root_every_concept_shares_weighs_less_than_a_rare_one(build):
 def test_max_seeds_caps_how_many_entry_points_a_query_opens(build):
     script = {"c0": [(f"colite {i}", "p", f"altro {i}") for i in range(10)]}
     index = build([_chunk("c0")], script, max_seeds=3)
-    assert len(index._match(roots("colite", Language.ENGLISH))) == 3
+    assert len(index._match(roots("colite", Language.ITALIAN))) == 3
 
 
 # --- idempotence, which the content-hashed chunk ids depend on -------------------------
@@ -279,7 +281,7 @@ def test_the_seeder_decides_what_a_node_carries_and_where_a_query_enters(build):
     index = build(
         [_chunk("c0"), _chunk("c1")],
         {"c0": [("colite", "p", "steroidi")], "c1": [("glicemia", "p", "insulina")]},
-        seeder=_FixedSeeder(),
+        seeders=[_FixedSeeder()],
     )
     assert _mark(index, "colite") == "COLITE"
     assert set(dict(index._search("anything at all", top_i=10))) == {"c0"}
@@ -289,9 +291,55 @@ def test_the_query_is_read_as_it_is_with_its_inflections(build):
     index = build(
         [_chunk("c0"), _chunk("c1")],
         {"c0": [("colite", "p", "steroidi")], "c1": [("glicemia", "p", "insulina")]},
-        seeder=LexicalSeeder(language=Language.ITALIAN),
+        seeders=[LexicalSeeder(language=Language.ITALIAN)],
     )
     assert set(dict(index._search("come si curano le coliti?", top_i=10))) == {"c0"}
+
+
+class _TableEmbedder(BaseEmbedder):
+    """Steroids and corticosteroids point the same way, sugar the other: no shared word."""
+
+    TABLE = {
+        "colite": [0.6, 0.0, 0.8],
+        "corticosteroidi": [1.0, 0.0, 0.0],
+        "steroidi": [0.9, 0.1, 0.0],
+        "glicemia": [0.0, 1.0, 0.0],
+        "insulina": [0.0, 0.9, 0.1],
+    }
+
+    def embed_chunks(self, chunks):
+        return np.array([self.TABLE[text] for text in chunks], dtype=np.float32)
+
+    def embed_query(self, query):
+        return np.array([self.TABLE[query]], dtype=np.float32)
+
+
+_SCRIPT = {"c0": [("colite", "p", "corticosteroidi")], "c1": [("glicemia", "p", "insulina")]}
+
+
+def test_the_semantic_seeder_enters_where_no_word_matches(build):
+    index = build(
+        [_chunk("c0"), _chunk("c1")],
+        _SCRIPT,
+        seeders=[SemanticSeeder(_TableEmbedder(), min_similarity=0.5)],
+    )
+    assert set(dict(index._search("steroidi", top_i=10))) == {"c0"}
+
+
+def test_several_seeders_each_open_their_own_doors(build):
+    """The node carries what every seeder needs, and the query enters through either."""
+    index = build(
+        [_chunk("c0"), _chunk("c1")],
+        _SCRIPT,
+        seeders=[LexicalSeeder(), SemanticSeeder(_TableEmbedder(), min_similarity=0.5)],
+    )
+    assert set(dict(index._search("steroidi", top_i=10))) == {"c0"}  # by meaning
+    assert set(dict(index._search("insulina", top_i=10))) == {"c1"}  # by word
+
+
+def test_no_seeders_means_no_entry_from_a_query(build):
+    index = build([_chunk("c0")], _SCRIPT, seeders=[])
+    assert index._search("colite", top_i=10) == []
 
 
 # --- expansion: entering from the chunks the retrievers found ---------------------------

@@ -4,12 +4,14 @@ The graph is stood in for by a stub that records what it was asked to match, so 
 check the seeder's own decisions; the tiers' matching is covered in test_graph_index.py.
 """
 
+import numpy as np
 import pytest
 from fastembed import SparseTextEmbedding
 from fastembed.common.utils import remove_non_alphanumeric
 
+from auth_rag.embedding.embedder import BaseEmbedder
 from auth_rag.indexing.relation.extractor import BaseExtractor, Triple
-from auth_rag.indexing.relation.seeder import LexicalSeeder, bm25, roots
+from auth_rag.indexing.relation.seeder import LexicalSeeder, SemanticSeeder, bm25, roots
 from auth_rag.types import Chunk, Language
 
 
@@ -24,6 +26,10 @@ class _Graph:
     def _match(self, roots_: list[str]) -> dict[str, float]:
         self.asked.append(roots_)
         return self.scores.get(" ".join(roots_), {})
+
+    def _nearest(self, vector: list[float]) -> dict[str, float]:
+        self.asked.append(vector)
+        return self.scores.get(tuple(vector), {})
 
 
 class _NamingExtractor(BaseExtractor):
@@ -126,3 +132,53 @@ def test_max_seeds_caps_the_entry_points():
 def test_the_seeder_hands_the_node_its_roots():
     seeder = LexicalSeeder(language=Language.ITALIAN)
     assert seeder.represent("Coliti acute") == {"roots": "col acut"}
+
+
+# --- the semantic seeder ---------------------------------------------------------------
+
+
+class _Embedder(BaseEmbedder):
+    """One axis per text, so a vector says which text it came from; records who asked."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, list[str]]] = []
+
+    def _vector(self, text: str) -> list[float]:
+        return [1.0, 0.0] if "colite" in text else [0.0, 1.0]
+
+    def embed_chunks(self, chunks):
+        self.calls.append(("chunks", list(chunks)))
+        return np.array([self._vector(text) for text in chunks])
+
+    def embed_query(self, query):
+        self.calls.append(("query", [query]))
+        return np.array([self._vector(query)])
+
+
+def test_without_an_extractor_the_query_is_embedded_as_a_query():
+    embedder = _Embedder()
+    graph = _Graph({(1.0, 0.0): {"colite": 0.8, "colite acuta": 0.4}})
+    seeds = SemanticSeeder(embedder).seeds("come si cura la colite?", graph)
+    assert embedder.calls == [("query", ["come si cura la colite?"])]
+    assert seeds == {"colite": 1.0, "colite acuta": 0.5}
+
+
+def test_with_an_extractor_each_concept_is_embedded_and_matched_on_its_own():
+    embedder = _Embedder()
+    graph = _Graph({(1.0, 0.0): {"colite": 0.9}, (0.0, 1.0): {"steroidi": 0.6}})
+    extractor = _NamingExtractor(["colite", "steroidi"])
+    seeds = SemanticSeeder(embedder, extractor).seeds("q", graph)
+    assert embedder.calls == [("chunks", ["colite", "steroidi"])]
+    assert graph.asked == [[1.0, 0.0], [0.0, 1.0]]
+    assert seeds == {"colite": 1.0, "steroidi": pytest.approx(0.6 / 0.9)}
+
+
+def test_a_concept_not_similar_enough_is_not_entered():
+    graph = _Graph({(1.0, 0.0): {"colite": 0.8, "glicemia": 0.2}})
+    seeds = SemanticSeeder(_Embedder(), min_similarity=0.5).seeds("colite", graph)
+    assert seeds == {"colite": 1.0}
+
+
+def test_the_semantic_seeder_hands_the_node_its_embedding():
+    assert SemanticSeeder(_Embedder()).represent("colite") == {"embedding": [1.0, 0.0]}
+
