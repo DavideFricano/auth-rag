@@ -26,7 +26,7 @@ class LexicalIndex(SimilarityIndex):
         store: BaseStore,
         db: QdrantClient,
         collection: str = "lexical",
-        language: Language = Language.ENGLISH,
+        language: Language = Language.ITALIAN,
         schema: AccessSchema | None = None,
     ) -> None:
         super().__init__(store, db, collection, schema)
@@ -69,7 +69,7 @@ class VolatileLexicalIndex(LexicalIndex):
         self,
         store: BaseStore,
         collection: str = "lexical",
-        language: Language = Language.ENGLISH,
+        language: Language = Language.ITALIAN,
         schema: AccessSchema | None = None,
     ) -> None:
         super().__init__(store, QdrantClient(location=":memory:"), collection, language, schema)
@@ -83,7 +83,7 @@ class PersistentLexicalIndex(LexicalIndex):
         store: BaseStore,
         path: str = "./data/db/lexical",
         collection: str = "lexical",
-        language: Language = Language.ENGLISH,
+        language: Language = Language.ITALIAN,
         schema: AccessSchema | None = None,
     ) -> None:
         super().__init__(store, QdrantClient(path=path), collection, language, schema)
@@ -97,7 +97,7 @@ class RemoteLexicalIndex(LexicalIndex):
         store: BaseStore,
         url: str,
         collection: str = "lexical",
-        language: Language = Language.ENGLISH,
+        language: Language = Language.ITALIAN,
         schema: AccessSchema | None = None,
         **client_kwargs,
     ) -> None:

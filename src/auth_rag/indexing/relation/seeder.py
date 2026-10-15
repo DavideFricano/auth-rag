@@ -89,7 +89,7 @@ class LexicalSeeder(BaseSeeder):
     """
 
     def __init__(
-        self, extractor: BaseExtractor | None = None, language: Language = Language.ENGLISH
+        self, extractor: BaseExtractor | None = None, language: Language = Language.ITALIAN
     ) -> None:
         self.extractor = extractor
         self.language = language
