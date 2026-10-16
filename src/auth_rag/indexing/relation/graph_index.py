@@ -41,10 +41,12 @@ class VolatileGraphIndex(RelationIndex):
         self.by_chunk: dict[str, set[str]] = {}  # the reverse of each node's "chunks"
 
     def _add(self, relations: Sequence[Relation]) -> None:
+        names = dict.fromkeys(name for r in relations for name in (r.subject, r.object))
+        represented = self._represent([name for name in names if name not in self.graph])
         for relation in relations:
             for name in (relation.subject, relation.object):
                 if name not in self.graph:
-                    self.graph.add_node(name, chunks={}, **self._represent(name))
+                    self.graph.add_node(name, chunks={}, **represented[name])
                 self.graph.nodes[name]["chunks"][relation.chunk_id] = relation.source_id
                 self.by_chunk.setdefault(relation.chunk_id, set()).add(name)
             self.graph.add_edge(
@@ -205,19 +207,24 @@ class RemoteGraphIndex(RelationIndex):
         if not relations:
             return
         self._ensure_constraints()
+        # every name of the batch once; one already in the graph is represented for nothing,
+        # since ON CREATE leaves it as it was, which asking first would cost a query to avoid
+        represented = self._represent(
+            list(dict.fromkeys(name for r in relations for name in (r.subject, r.object)))
+        )
         rows = [
             {
                 "subject": relation.subject,
-                "subject_props": self._represent(relation.subject),
+                "subject_props": represented[relation.subject],
                 "predicate": relation.predicate,
                 "object": relation.object,
-                "object_props": self._represent(relation.object),
+                "object_props": represented[relation.object],
                 "chunk_id": relation.chunk_id,
                 "source_id": relation.source_id,
             }
             for relation in relations
         ]
-        embedded = [row["subject_props"] for row in rows if "embedding" in row["subject_props"]]
+        embedded = [props for props in represented.values() if "embedding" in props]
         if embedded:
             self._ensure_vector_index(len(embedded[0]["embedding"]))
         self._run(  # every MERGE is on the identity of the thing, so this upserts

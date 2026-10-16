@@ -114,11 +114,13 @@ class RelationIndex(BaseIndex, ABC):
                 )
         self._add(relations)
 
-    def _represent(self, name: str) -> dict[str, object]:
-        """What a new node carries: what every seeder needs to find it by."""
-        return {
-            key: value for seeder in self.seeders for key, value in seeder.represent(name).items()
-        }
+    def _represent(self, names: list[str]) -> dict[str, dict[str, object]]:
+        """What each new node carries: what every seeder needs to find it by."""
+        represented: dict[str, dict[str, object]] = {name: {} for name in names}
+        for seeder in self.seeders:
+            for name, properties in zip(names, seeder.represent(names), strict=True):
+                represented[name].update(properties)
+        return represented
 
     @abstractmethod
     def _add(self, relations: Sequence[Relation]) -> None:

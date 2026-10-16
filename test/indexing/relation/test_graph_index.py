@@ -264,8 +264,8 @@ def test_delete_removes_the_nodes_left_with_nothing(build):
 class _FixedSeeder(BaseSeeder):
     """Enters from one concept whatever the query, and marks the nodes it sees created."""
 
-    def represent(self, name: str) -> dict[str, object]:
-        return {"mark": name.upper()}
+    def represent(self, names: list[str]) -> list[dict[str, object]]:
+        return [{"mark": name.upper()} for name in names]
 
     def seeds(self, query: str, graph) -> dict[str, float]:
         return {"steroidi": 1.0}
@@ -335,6 +335,16 @@ def test_several_seeders_each_open_their_own_doors(build):
     )
     assert set(dict(index._search("steroidi", top_i=10))) == {"c0"}  # by meaning
     assert set(dict(index._search("insulina", top_i=10))) == {"c1"}  # by word
+
+
+def test_an_insert_embeds_its_new_concepts_in_one_call(build):
+    embedder = _TableEmbedder()
+    calls = []
+    embed = embedder.embed_chunks
+    embedder.embed_chunks = lambda chunks: calls.append(list(chunks)) or embed(chunks)
+    build([_chunk("c0"), _chunk("c1")], _SCRIPT, seeders=[SemanticSeeder(embedder)])
+    assert len(calls) == 1
+    assert set(calls[0]) == {"colite", "corticosteroidi", "glicemia", "insulina"}
 
 
 def test_no_seeders_means_no_entry_from_a_query(build):

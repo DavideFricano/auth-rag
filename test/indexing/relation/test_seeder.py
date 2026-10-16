@@ -131,7 +131,7 @@ def test_max_seeds_caps_the_entry_points():
 
 def test_the_seeder_hands_the_node_its_roots():
     seeder = LexicalSeeder(language=Language.ITALIAN)
-    assert seeder.represent("Coliti acute") == {"roots": "col acut"}
+    assert seeder.represent(["Coliti acute", "colite"]) == [{"roots": "col acut"}, {"roots": "col"}]
 
 
 # --- the semantic seeder ---------------------------------------------------------------
@@ -179,6 +179,16 @@ def test_a_concept_not_similar_enough_is_not_entered():
     assert seeds == {"colite": 1.0}
 
 
-def test_the_semantic_seeder_hands_the_node_its_embedding():
-    assert SemanticSeeder(_Embedder()).represent("colite") == {"embedding": [1.0, 0.0]}
+def test_the_semantic_seeder_embeds_every_new_name_in_one_call():
+    """A call costs what it costs whatever its size, so a batch of names is one call."""
+    embedder = _Embedder()
+    represented = SemanticSeeder(embedder).represent(["colite", "steroidi"])
+    assert represented == [{"embedding": [1.0, 0.0]}, {"embedding": [0.0, 1.0]}]
+    assert embedder.calls == [("chunks", ["colite", "steroidi"])]
+
+
+def test_nothing_to_represent_costs_no_call():
+    embedder = _Embedder()
+    assert SemanticSeeder(embedder).represent([]) == []
+    assert embedder.calls == []
 

@@ -87,8 +87,13 @@ class BaseSeeder(ABC):
     """
 
     @abstractmethod
-    def represent(self, name: str) -> dict[str, object]:
-        """The properties a new node with this name carries."""
+    def represent(self, names: list[str]) -> list[dict[str, object]]:
+        """The properties each new node carries, in the order of ``names``.
+
+        A list rather than one name, because a representation may cost a call whatever its
+        size — an embedding does — and one call for every node an insert creates beats one
+        per node.
+        """
 
     @abstractmethod
     def seeds(self, query: str, graph: RelationIndex) -> dict[str, float]:
@@ -111,8 +116,8 @@ class LexicalSeeder(BaseSeeder):
         self.extractor = extractor
         self.language = language
 
-    def represent(self, name: str) -> dict[str, object]:
-        return {"roots": " ".join(roots(name, self.language))}
+    def represent(self, names: list[str]) -> list[dict[str, object]]:
+        return [{"roots": " ".join(roots(name, self.language))} for name in names]
 
     def seeds(self, query: str, graph: RelationIndex) -> dict[str, float]:
         texts = self.extractor.entities(query) if self.extractor is not None else [query]
@@ -141,8 +146,10 @@ class SemanticSeeder(BaseSeeder):
         self.extractor = extractor
         self.min_similarity = min_similarity
 
-    def represent(self, name: str) -> dict[str, object]:
-        return {"embedding": self.embedder.embed_chunks([name])[0].tolist()}
+    def represent(self, names: list[str]) -> list[dict[str, object]]:
+        if not names:
+            return []
+        return [{"embedding": vector.tolist()} for vector in self.embedder.embed_chunks(names)]
 
     def seeds(self, query: str, graph: RelationIndex) -> dict[str, float]:
         if self.extractor is None:
